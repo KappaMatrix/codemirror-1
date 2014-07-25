@@ -414,7 +414,8 @@ define("vendor/almond", function(){});
 
 /**
  * @license
- * Lo-Dash 2.1.0 <http://lodash.com/>
+ * Lo-Dash 2.4.1 (Custom Build) <http://lodash.com/>
+ * Build: `lodash modern minus="template"`
  * Copyright 2012-2013 The Dojo Foundation <http://dojofoundation.org/>
  * Based on Underscore.js 1.5.2 <http://underscorejs.org/LICENSE>
  * Copyright 2009-2013 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
@@ -431,9 +432,6 @@ define("vendor/almond", function(){});
 
   /** Used to generate unique IDs */
   var idCounter = 0;
-
-  /** Used internally to indicate various things */
-  var indicatorObject = {};
 
   /** Used to prefix keys to avoid issues with `__proto__` and properties on `Object.prototype` */
   var keyPrefix = +new Date + '';
@@ -456,60 +454,30 @@ define("vendor/almond", function(){});
     '\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000'
   );
 
-  /** Used to match empty string literals in compiled template source */
-  var reEmptyStringLeading = /\b__p \+= '';/g,
-      reEmptyStringMiddle = /\b(__p \+=) '' \+/g,
-      reEmptyStringTrailing = /(__e\(.*?\)|\b__t\)) \+\n'';/g;
-
-  /**
-   * Used to match ES6 template delimiters
-   * http://people.mozilla.org/~jorendorff/es6-draft.html#sec-7.8.6
-   */
-  var reEsTemplate = /\$\{([^\\}]*(?:\\.[^\\}]*)*)\}/g;
-
   /** Used to match regexp flags from their coerced string values */
   var reFlags = /\w*$/;
 
   /** Used to detected named functions */
-  var reFuncName = /^function[ \n\r\t]+\w/;
-
-  /** Used to match "interpolate" template delimiters */
-  var reInterpolate = /<%=([\s\S]+?)%>/g;
+  var reFuncName = /^\s*function[ \n\r\t]+\w/;
 
   /** Used to match leading whitespace and zeros to be removed */
   var reLeadingSpacesAndZeros = RegExp('^[' + whitespace + ']*0+(?=.$)');
 
-  /** Used to ensure capturing order of template delimiters */
-  var reNoMatch = /($^)/;
-
   /** Used to detect functions containing a `this` reference */
   var reThis = /\bthis\b/;
 
-  /** Used to match unescaped characters in compiled string literals */
-  var reUnescapedString = /['\n\r\t\u2028\u2029\\]/g;
-
   /** Used to assign default `context` object properties */
   var contextProps = [
-    'Array', 'Boolean', 'Date', 'Error', 'Function', 'Math', 'Number', 'Object',
+    'Array', 'Boolean', 'Date', 'Function', 'Math', 'Number', 'Object',
     'RegExp', 'String', '_', 'attachEvent', 'clearTimeout', 'isFinite', 'isNaN',
-    'parseInt', 'setImmediate', 'setTimeout'
+    'parseInt', 'setTimeout'
   ];
-
-  /** Used to fix the JScript [[DontEnum]] bug */
-  var shadowedProps = [
-    'constructor', 'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable',
-    'toLocaleString', 'toString', 'valueOf'
-  ];
-
-  /** Used to make template sourceURLs easier to identify */
-  var templateCounter = 0;
 
   /** `Object#toString` result shortcuts */
   var argsClass = '[object Arguments]',
       arrayClass = '[object Array]',
       boolClass = '[object Boolean]',
       dateClass = '[object Date]',
-      errorClass = '[object Error]',
       funcClass = '[object Function]',
       numberClass = '[object Number]',
       objectClass = '[object Object]',
@@ -524,6 +492,21 @@ define("vendor/almond", function(){});
   cloneableClasses[numberClass] = cloneableClasses[objectClass] =
   cloneableClasses[regexpClass] = cloneableClasses[stringClass] = true;
 
+  /** Used as an internal `_.debounce` options object */
+  var debounceOptions = {
+    'leading': false,
+    'maxWait': 0,
+    'trailing': false
+  };
+
+  /** Used as the property descriptor for `__bindData__` */
+  var descriptor = {
+    'configurable': false,
+    'enumerable': false,
+    'value': null,
+    'writable': false
+  };
+
   /** Used to determine if values are of the language type Object */
   var objectTypes = {
     'boolean': false,
@@ -532,17 +515,6 @@ define("vendor/almond", function(){});
     'number': false,
     'string': false,
     'undefined': false
-  };
-
-  /** Used to escape characters for inclusion in compiled string literals */
-  var stringEscapes = {
-    '\\': '\\',
-    "'": "'",
-    '\n': 'n',
-    '\r': 'r',
-    '\t': 't',
-    '\u2028': 'u2028',
-    '\u2029': 'u2029'
   };
 
   /** Used as a reference to the global object */
@@ -664,22 +636,29 @@ define("vendor/almond", function(){});
    */
   function compareAscending(a, b) {
     var ac = a.criteria,
-        bc = b.criteria;
+        bc = b.criteria,
+        index = -1,
+        length = ac.length;
 
-    // ensure a stable sort in V8 and other engines
-    // http://code.google.com/p/v8/issues/detail?id=90
-    if (ac !== bc) {
-      if (ac > bc || typeof ac == 'undefined') {
-        return 1;
-      }
-      if (ac < bc || typeof bc == 'undefined') {
-        return -1;
+    while (++index < length) {
+      var value = ac[index],
+          other = bc[index];
+
+      if (value !== other) {
+        if (value > other || typeof value == 'undefined') {
+          return 1;
+        }
+        if (value < other || typeof other == 'undefined') {
+          return -1;
+        }
       }
     }
-    // The JS engine embedded in Adobe applications like InDesign has a buggy
-    // `Array#sort` implementation that causes it, under certain circumstances,
-    // to return the same value for `a` and `b`.
-    // See https://github.com/jashkenas/underscore/pull/1247
+    // Fixes an `Array#sort` bug in the JS engine embedded in Adobe applications
+    // that causes it, under certain circumstances, to return the same value for
+    // `a` and `b`. See https://github.com/jashkenas/underscore/pull/1247
+    //
+    // This also ensures a stable sort in V8 and other engines.
+    // See http://code.google.com/p/v8/issues/detail?id=90
     return a.index - b.index;
   }
 
@@ -716,18 +695,6 @@ define("vendor/almond", function(){});
   }
 
   /**
-   * Used by `template` to escape characters for inclusion in compiled
-   * string literals.
-   *
-   * @private
-   * @param {string} match The matched character to escape.
-   * @returns {string} Returns the escaped character.
-   */
-  function escapeStringChar(match) {
-    return '\\' + stringEscapes[match];
-  }
-
-  /**
    * Gets an array from the array pool or creates a new one if the pool is empty.
    *
    * @private
@@ -745,58 +712,20 @@ define("vendor/almond", function(){});
    */
   function getObject() {
     return objectPool.pop() || {
-      'args': '',
       'array': null,
-      'bottom': '',
       'cache': null,
-      'configurable': false,
       'criteria': null,
-      'enumerable': false,
       'false': false,
-      'firstArg': '',
       'index': 0,
-      'init': '',
-      'keys': null,
-      'leading': false,
-      'loop': '',
-      'maxWait': 0,
       'null': false,
       'number': null,
       'object': null,
       'push': null,
-      'shadowedProps': null,
       'string': null,
-      'support': null,
-      'top': '',
-      'trailing': false,
       'true': false,
       'undefined': false,
-      'useHas': false,
-      'value': null,
-      'writable': false
+      'value': null
     };
-  }
-
-  /**
-   * Checks if `value` is a DOM node in IE < 9.
-   *
-   * @private
-   * @param {*} value The value to check.
-   * @returns {boolean} Returns `true` if the `value` is a DOM node, else `false`.
-   */
-  function isNode(value) {
-    // IE < 9 presents DOM nodes as `Object` objects except they have `toString`
-    // methods that are `typeof` "string" and still can coerce nodes to strings
-    return typeof value.toString != 'function' && typeof (value + '') == 'string';
-  }
-
-  /**
-   * A no-operation function.
-   *
-   * @private
-   */
-  function noop() {
-    // no operation performed
   }
 
   /**
@@ -879,7 +808,6 @@ define("vendor/almond", function(){});
     var Array = context.Array,
         Boolean = context.Boolean,
         Date = context.Date,
-        Error = context.Error,
         Function = context.Function,
         Math = context.Math,
         Number = context.Number,
@@ -897,18 +825,19 @@ define("vendor/almond", function(){});
     var arrayRef = [];
 
     /** Used for native method references */
-    var errorProto = Error.prototype,
-        objectProto = Object.prototype,
-        stringProto = String.prototype;
+    var objectProto = Object.prototype;
 
     /** Used to restore the original `_` reference in `noConflict` */
     var oldDash = context._;
 
+    /** Used to resolve the internal [[Class]] of values */
+    var toString = objectProto.toString;
+
     /** Used to detect if a method is native */
     var reNative = RegExp('^' +
-      String(objectProto.valueOf)
+      String(toString)
         .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        .replace(/valueOf|for [^\]]+/g, '.+?') + '$'
+        .replace(/toString| for [^\]]+/g, '.*?') + '$'
     );
 
     /** Native method shortcuts */
@@ -916,42 +845,34 @@ define("vendor/almond", function(){});
         clearTimeout = context.clearTimeout,
         floor = Math.floor,
         fnToString = Function.prototype.toString,
-        getPrototypeOf = reNative.test(getPrototypeOf = Object.getPrototypeOf) && getPrototypeOf,
+        getPrototypeOf = isNative(getPrototypeOf = Object.getPrototypeOf) && getPrototypeOf,
         hasOwnProperty = objectProto.hasOwnProperty,
-        now = reNative.test(now = Date.now) && now || function() { return +new Date; },
         push = arrayRef.push,
-        propertyIsEnumerable = objectProto.propertyIsEnumerable,
-        setImmediate = context.setImmediate,
         setTimeout = context.setTimeout,
         splice = arrayRef.splice,
-        toString = objectProto.toString,
         unshift = arrayRef.unshift;
 
+    /** Used to set meta data on functions */
     var defineProperty = (function() {
+      // IE 8 only accepts DOM elements
       try {
         var o = {},
-            func = reNative.test(func = Object.defineProperty) && func,
+            func = isNative(func = Object.defineProperty) && func,
             result = func(o, o, o) && func;
       } catch(e) { }
       return result;
     }());
 
     /* Native method shortcuts for methods with the same name as other `lodash` methods */
-    var nativeBind = reNative.test(nativeBind = toString.bind) && nativeBind,
-        nativeCreate = reNative.test(nativeCreate = Object.create) && nativeCreate,
-        nativeIsArray = reNative.test(nativeIsArray = Array.isArray) && nativeIsArray,
+    var nativeCreate = isNative(nativeCreate = Object.create) && nativeCreate,
+        nativeIsArray = isNative(nativeIsArray = Array.isArray) && nativeIsArray,
         nativeIsFinite = context.isFinite,
         nativeIsNaN = context.isNaN,
-        nativeKeys = reNative.test(nativeKeys = Object.keys) && nativeKeys,
+        nativeKeys = isNative(nativeKeys = Object.keys) && nativeKeys,
         nativeMax = Math.max,
         nativeMin = Math.min,
         nativeParseInt = context.parseInt,
-        nativeRandom = Math.random,
-        nativeSlice = arrayRef.slice;
-
-    /** Detect various environments */
-    var isIeOpera = reNative.test(context.attachEvent),
-        isV8 = nativeBind && !/\n|true/.test(nativeBind + isIeOpera);
+        nativeRandom = Math.random;
 
     /** Used to lookup a built-in constructor by [[Class]] */
     var ctorByClass = {};
@@ -964,30 +885,11 @@ define("vendor/almond", function(){});
     ctorByClass[regexpClass] = RegExp;
     ctorByClass[stringClass] = String;
 
-    /** Used to avoid iterating non-enumerable properties in IE < 9 */
-    var nonEnumProps = {};
-    nonEnumProps[arrayClass] = nonEnumProps[dateClass] = nonEnumProps[numberClass] = { 'constructor': true, 'toLocaleString': true, 'toString': true, 'valueOf': true };
-    nonEnumProps[boolClass] = nonEnumProps[stringClass] = { 'constructor': true, 'toString': true, 'valueOf': true };
-    nonEnumProps[errorClass] = nonEnumProps[funcClass] = nonEnumProps[regexpClass] = { 'constructor': true, 'toString': true };
-    nonEnumProps[objectClass] = { 'constructor': true };
-
-    (function() {
-      var length = shadowedProps.length;
-      while (length--) {
-        var prop = shadowedProps[length];
-        for (var className in nonEnumProps) {
-          if (hasOwnProperty.call(nonEnumProps, className) && !hasOwnProperty.call(nonEnumProps[className], prop)) {
-            nonEnumProps[className][prop] = false;
-          }
-        }
-      }
-    }());
-
     /*--------------------------------------------------------------------------*/
 
     /**
-     * Creates a `lodash` object which wraps the given value to enable method
-     * chaining.
+     * Creates a `lodash` object which wraps the given value to enable intuitive
+     * method chaining.
      *
      * In addition to Lo-Dash methods, wrappers also have the following `Array` methods:
      * `concat`, `join`, `pop`, `push`, `reverse`, `shift`, `slice`, `sort`, `splice`,
@@ -998,15 +900,16 @@ define("vendor/almond", function(){});
      *
      * The chainable wrapper functions are:
      * `after`, `assign`, `bind`, `bindAll`, `bindKey`, `chain`, `compact`,
-     * `compose`, `concat`, `countBy`, `createCallback`, `curry`, `debounce`,
-     * `defaults`, `defer`, `delay`, `difference`, `filter`, `flatten`, `forEach`,
-     * `forEachRight`, `forIn`, `forInRight`, `forOwn`, `forOwnRight`, `functions`,
-     * `groupBy`, `indexBy`, `initial`, `intersection`, `invert`, `invoke`, `keys`,
-     * `map`, `max`, `memoize`, `merge`, `min`, `object`, `omit`, `once`, `pairs`,
-     * `partial`, `partialRight`, `pick`, `pluck`, `pull`, `push`, `range`, `reject`,
-     * `remove`, `rest`, `reverse`, `shuffle`, `slice`, `sort`, `sortBy`, `splice`,
-     * `tap`, `throttle`, `times`, `toArray`, `transform`, `union`, `uniq`, `unshift`,
-     * `unzip`, `values`, `where`, `without`, `wrap`, and `zip`
+     * `compose`, `concat`, `countBy`, `create`, `createCallback`, `curry`,
+     * `debounce`, `defaults`, `defer`, `delay`, `difference`, `filter`, `flatten`,
+     * `forEach`, `forEachRight`, `forIn`, `forInRight`, `forOwn`, `forOwnRight`,
+     * `functions`, `groupBy`, `indexBy`, `initial`, `intersection`, `invert`,
+     * `invoke`, `keys`, `map`, `max`, `memoize`, `merge`, `min`, `object`, `omit`,
+     * `once`, `pairs`, `partial`, `partialRight`, `pick`, `pluck`, `pull`, `push`,
+     * `range`, `reject`, `remove`, `rest`, `reverse`, `shuffle`, `slice`, `sort`,
+     * `sortBy`, `splice`, `tap`, `throttle`, `times`, `toArray`, `transform`,
+     * `union`, `uniq`, `unshift`, `unzip`, `values`, `where`, `without`, `wrap`,
+     * and `zip`
      *
      * The non-chainable wrapper functions are:
      * `clone`, `cloneDeep`, `contains`, `escape`, `every`, `find`, `findIndex`,
@@ -1020,6 +923,8 @@ define("vendor/almond", function(){});
      *
      * The wrapper functions `first` and `last` return wrapped values when `n` is
      * provided, otherwise they return unwrapped values.
+     *
+     * Explicit chaining can be enabled by using the `_.chain` method.
      *
      * @name _
      * @constructor
@@ -1078,325 +983,61 @@ define("vendor/almond", function(){});
      */
     var support = lodash.support = {};
 
-    (function() {
-      var ctor = function() { this.x = 1; },
-          object = { '0': 1, 'length': 1 },
-          props = [];
-
-      ctor.prototype = { 'valueOf': 1, 'y': 1 };
-      for (var prop in new ctor) { props.push(prop); }
-      for (prop in arguments) { }
-
-      /**
-       * Detect if an `arguments` object's [[Class]] is resolvable (all but Firefox < 4, IE < 9).
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.argsClass = toString.call(arguments) == argsClass;
-
-      /**
-       * Detect if `arguments` objects are `Object` objects (all but Narwhal and Opera < 10.5).
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.argsObject = arguments.constructor == Object && !(arguments instanceof Array);
-
-      /**
-       * Detect if `name` or `message` properties of `Error.prototype` are
-       * enumerable by default. (IE < 9, Safari < 5.1)
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.enumErrorProps = propertyIsEnumerable.call(errorProto, 'message') || propertyIsEnumerable.call(errorProto, 'name');
-
-      /**
-       * Detect if `prototype` properties are enumerable by default.
-       *
-       * Firefox < 3.6, Opera > 9.50 - Opera < 11.60, and Safari < 5.1
-       * (if the prototype or a property on the prototype has been set)
-       * incorrectly sets a function's `prototype` property [[Enumerable]]
-       * value to `true`.
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.enumPrototypes = propertyIsEnumerable.call(ctor, 'prototype');
-
-      /**
-       * Detect if `Function#bind` exists and is inferred to be fast (all but V8).
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.fastBind = nativeBind && !isV8;
-
-      /**
-       * Detect if functions can be decompiled by `Function#toString`
-       * (all but PS3 and older Opera mobile browsers & avoided in Windows 8 apps).
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.funcDecomp = !reNative.test(context.WinRTError) && reThis.test(runInContext);
-
-      /**
-       * Detect if `Function#name` is supported (all but IE).
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.funcNames = typeof Function.name == 'string';
-
-      /**
-       * Detect if `arguments` object indexes are non-enumerable
-       * (Firefox < 4, IE < 9, PhantomJS, Safari < 5.1).
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.nonEnumArgs = prop != 0;
-
-      /**
-       * Detect if properties shadowing those on `Object.prototype` are non-enumerable.
-       *
-       * In IE < 9 an objects own properties, shadowing non-enumerable ones, are
-       * made non-enumerable as well (a.k.a the JScript [[DontEnum]] bug).
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.nonEnumShadows = !/valueOf/.test(props);
-
-      /**
-       * Detect if own properties are iterated after inherited properties (all but IE < 9).
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.ownLast = props[0] != 'x';
-
-      /**
-       * Detect if `Array#shift` and `Array#splice` augment array-like objects correctly.
-       *
-       * Firefox < 10, IE compatibility mode, and IE < 9 have buggy Array `shift()`
-       * and `splice()` functions that fail to remove the last element, `value[0]`,
-       * of array-like objects even though the `length` property is set to `0`.
-       * The `shift()` method is buggy in IE 8 compatibility mode, while `splice()`
-       * is buggy regardless of mode in IE < 9 and buggy in compatibility mode in IE 9.
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.spliceObjects = (arrayRef.splice.call(object, 0, 1), !object[0]);
-
-      /**
-       * Detect lack of support for accessing string characters by index.
-       *
-       * IE < 8 can't access characters by index and IE 8 can only access
-       * characters by index on string literals.
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      support.unindexedChars = ('x'[0] + Object('x')[0]) != 'xx';
-
-      /**
-       * Detect if a DOM node's [[Class]] is resolvable (all but IE < 9)
-       * and that the JS engine errors when attempting to coerce an object to
-       * a string without a `toString` function.
-       *
-       * @memberOf _.support
-       * @type boolean
-       */
-      try {
-        support.nodeClass = !(toString.call(document) == objectClass && !({ 'toString': 0 } + ''));
-      } catch(e) {
-        support.nodeClass = true;
-      }
-    }(1));
+    /**
+     * Detect if functions can be decompiled by `Function#toString`
+     * (all but PS3 and older Opera mobile browsers & avoided in Windows 8 apps).
+     *
+     * @memberOf _.support
+     * @type boolean
+     */
+    support.funcDecomp = !isNative(context.WinRTError) && reThis.test(runInContext);
 
     /**
-     * By default, the template delimiters used by Lo-Dash are similar to those in
-     * embedded Ruby (ERB). Change the following template settings to use alternative
-     * delimiters.
+     * Detect if `Function#name` is supported (all but IE).
      *
-     * @static
-     * @memberOf _
-     * @type Object
+     * @memberOf _.support
+     * @type boolean
      */
-    lodash.templateSettings = {
-
-      /**
-       * Used to detect `data` property values to be HTML-escaped.
-       *
-       * @memberOf _.templateSettings
-       * @type RegExp
-       */
-      'escape': /<%-([\s\S]+?)%>/g,
-
-      /**
-       * Used to detect code to be evaluated.
-       *
-       * @memberOf _.templateSettings
-       * @type RegExp
-       */
-      'evaluate': /<%([\s\S]+?)%>/g,
-
-      /**
-       * Used to detect `data` property values to inject.
-       *
-       * @memberOf _.templateSettings
-       * @type RegExp
-       */
-      'interpolate': reInterpolate,
-
-      /**
-       * Used to reference the data object in the template text.
-       *
-       * @memberOf _.templateSettings
-       * @type string
-       */
-      'variable': '',
-
-      /**
-       * Used to import variables into the compiled template.
-       *
-       * @memberOf _.templateSettings
-       * @type Object
-       */
-      'imports': {
-
-        /**
-         * A reference to the `lodash` function.
-         *
-         * @memberOf _.templateSettings.imports
-         * @type Function
-         */
-        '_': lodash
-      }
-    };
+    support.funcNames = typeof Function.name == 'string';
 
     /*--------------------------------------------------------------------------*/
 
     /**
-     * The template used to create iterator functions.
+     * The base implementation of `_.bind` that creates the bound function and
+     * sets its meta data.
      *
      * @private
-     * @param {Object} data The data object used to populate the text.
-     * @returns {string} Returns the interpolated text.
+     * @param {Array} bindData The bind data array.
+     * @returns {Function} Returns the new bound function.
      */
-    var iteratorTemplate = template(
-      // the `iterable` may be reassigned by the `top` snippet
-      'var index, iterable = <%= firstArg %>, ' +
-      // assign the `result` variable an initial value
-      'result = <%= init %>;\n' +
-      // exit early if the first argument is falsey
-      'if (!iterable) return result;\n' +
-      // add code before the iteration branches
-      '<%= top %>;' +
+    function baseBind(bindData) {
+      var func = bindData[0],
+          partialArgs = bindData[2],
+          thisArg = bindData[4];
 
-      // array-like iteration:
-      '<% if (array) { %>\n' +
-      'var length = iterable.length; index = -1;\n' +
-      'if (<%= array %>) {' +
-
-      // add support for accessing string characters by index if needed
-      '  <% if (support.unindexedChars) { %>\n' +
-      '  if (isString(iterable)) {\n' +
-      "    iterable = iterable.split('')\n" +
-      '  }' +
-      '  <% } %>\n' +
-
-      // iterate over the array-like value
-      '  while (++index < length) {\n' +
-      '    <%= loop %>;\n' +
-      '  }\n' +
-      '}\n' +
-      'else {' +
-
-      // object iteration:
-      // add support for iterating over `arguments` objects if needed
-      '  <% } else if (support.nonEnumArgs) { %>\n' +
-      '  var length = iterable.length; index = -1;\n' +
-      '  if (length && isArguments(iterable)) {\n' +
-      '    while (++index < length) {\n' +
-      "      index += '';\n" +
-      '      <%= loop %>;\n' +
-      '    }\n' +
-      '  } else {' +
-      '  <% } %>' +
-
-      // avoid iterating over `prototype` properties in older Firefox, Opera, and Safari
-      '  <% if (support.enumPrototypes) { %>\n' +
-      "  var skipProto = typeof iterable == 'function';\n" +
-      '  <% } %>' +
-
-      // avoid iterating over `Error.prototype` properties in older IE and Safari
-      '  <% if (support.enumErrorProps) { %>\n' +
-      '  var skipErrorProps = iterable === errorProto || iterable instanceof Error;\n' +
-      '  <% } %>' +
-
-      // define conditions used in the loop
-      '  <%' +
-      '    var conditions = [];' +
-      '    if (support.enumPrototypes) { conditions.push(\'!(skipProto && index == "prototype")\'); }' +
-      '    if (support.enumErrorProps)  { conditions.push(\'!(skipErrorProps && (index == "message" || index == "name"))\'); }' +
-      '  %>' +
-
-      // iterate own properties using `Object.keys`
-      '  <% if (useHas && keys) { %>\n' +
-      '  var ownIndex = -1,\n' +
-      '      ownProps = objectTypes[typeof iterable] && keys(iterable),\n' +
-      '      length = ownProps ? ownProps.length : 0;\n\n' +
-      '  while (++ownIndex < length) {\n' +
-      '    index = ownProps[ownIndex];\n<%' +
-      "    if (conditions.length) { %>    if (<%= conditions.join(' && ') %>) {\n  <% } %>" +
-      '    <%= loop %>;' +
-      '    <% if (conditions.length) { %>\n    }<% } %>\n' +
-      '  }' +
-
-      // else using a for-in loop
-      '  <% } else { %>\n' +
-      '  for (index in iterable) {\n<%' +
-      '    if (useHas) { conditions.push("hasOwnProperty.call(iterable, index)"); }' +
-      "    if (conditions.length) { %>    if (<%= conditions.join(' && ') %>) {\n  <% } %>" +
-      '    <%= loop %>;' +
-      '    <% if (conditions.length) { %>\n    }<% } %>\n' +
-      '  }' +
-
-      // Because IE < 9 can't set the `[[Enumerable]]` attribute of an
-      // existing property and the `constructor` property of a prototype
-      // defaults to non-enumerable, Lo-Dash skips the `constructor`
-      // property when it infers it's iterating over a `prototype` object.
-      '    <% if (support.nonEnumShadows) { %>\n\n' +
-      '  if (iterable !== objectProto) {\n' +
-      "    var ctor = iterable.constructor,\n" +
-      '        isProto = iterable === (ctor && ctor.prototype),\n' +
-      '        className = iterable === stringProto ? stringClass : iterable === errorProto ? errorClass : toString.call(iterable),\n' +
-      '        nonEnum = nonEnumProps[className];\n' +
-      '      <% for (k = 0; k < 7; k++) { %>\n' +
-      "    index = '<%= shadowedProps[k] %>';\n" +
-      '    if ((!(isProto && nonEnum[index]) && hasOwnProperty.call(iterable, index))<%' +
-      '        if (!useHas) { %> || (!nonEnum[index] && iterable[index] !== objectProto[index])<% }' +
-      '      %>) {\n' +
-      '      <%= loop %>;\n' +
-      '    }' +
-      '      <% } %>\n' +
-      '  }' +
-      '    <% } %>' +
-      '  <% } %>' +
-      '  <% if (array || support.nonEnumArgs) { %>\n}<% } %>\n' +
-
-      // add code to the bottom of the iteration function
-      '<%= bottom %>;\n' +
-      // finally, return the `result`
-      'return result'
-    );
-
-    /*--------------------------------------------------------------------------*/
+      function bound() {
+        // `Function#bind` spec
+        // http://es5.github.io/#x15.3.4.5
+        if (partialArgs) {
+          // avoid `arguments` object deoptimizations by using `slice` instead
+          // of `Array.prototype.slice.call` and not assigning `arguments` to a
+          // variable as a ternary expression
+          var args = slice(partialArgs);
+          push.apply(args, arguments);
+        }
+        // mimic the constructor's `return` behavior
+        // http://es5.github.io/#x13.2.2
+        if (this instanceof bound) {
+          // ensure `new bound` is an instance of `func`
+          var thisBinding = baseCreate(func.prototype),
+              result = func.apply(thisBinding, args || arguments);
+          return isObject(result) ? result : thisBinding;
+        }
+        return func.apply(thisArg, args || arguments);
+      }
+      setBindData(bound, bindData);
+      return bound;
+    }
 
     /**
      * The base implementation of `_.clone` without argument juggling or support
@@ -1404,64 +1045,62 @@ define("vendor/almond", function(){});
      *
      * @private
      * @param {*} value The value to clone.
-     * @param {boolean} [deep=false] Specify a deep clone.
+     * @param {boolean} [isDeep=false] Specify a deep clone.
      * @param {Function} [callback] The function to customize cloning values.
      * @param {Array} [stackA=[]] Tracks traversed source objects.
      * @param {Array} [stackB=[]] Associates clones with source counterparts.
-     * @returns {*} Returns the cloned `value`.
+     * @returns {*} Returns the cloned value.
      */
-    function baseClone(value, deep, callback, stackA, stackB) {
-      var result = value;
-
+    function baseClone(value, isDeep, callback, stackA, stackB) {
       if (callback) {
-        result = callback(result);
+        var result = callback(value);
         if (typeof result != 'undefined') {
           return result;
         }
-        result = value;
       }
       // inspect [[Class]]
-      var isObj = isObject(result);
+      var isObj = isObject(value);
       if (isObj) {
-        var className = toString.call(result);
-        if (!cloneableClasses[className] || (!support.nodeClass && isNode(result))) {
-          return result;
+        var className = toString.call(value);
+        if (!cloneableClasses[className]) {
+          return value;
         }
-        var isArr = isArray(result);
-      }
-      // shallow clone
-      if (!isObj || !deep) {
-        return isObj
-          ? (isArr ? slice(result) : assign({}, result))
-          : result;
-      }
-      var ctor = ctorByClass[className];
-      switch (className) {
-        case boolClass:
-        case dateClass:
-          return new ctor(+result);
+        var ctor = ctorByClass[className];
+        switch (className) {
+          case boolClass:
+          case dateClass:
+            return new ctor(+value);
 
-        case numberClass:
-        case stringClass:
-          return new ctor(result);
+          case numberClass:
+          case stringClass:
+            return new ctor(value);
 
-        case regexpClass:
-          return ctor(result.source, reFlags.exec(result));
-      }
-      // check for circular references and return corresponding clone
-      var initedStack = !stackA;
-      stackA || (stackA = getArray());
-      stackB || (stackB = getArray());
-
-      var length = stackA.length;
-      while (length--) {
-        if (stackA[length] == value) {
-          return stackB[length];
+          case regexpClass:
+            result = ctor(value.source, reFlags.exec(value));
+            result.lastIndex = value.lastIndex;
+            return result;
         }
+      } else {
+        return value;
       }
-      // init cloned object
-      result = isArr ? ctor(result.length) : {};
+      var isArr = isArray(value);
+      if (isDeep) {
+        // check for circular references and return corresponding clone
+        var initedStack = !stackA;
+        stackA || (stackA = getArray());
+        stackB || (stackB = getArray());
 
+        var length = stackA.length;
+        while (length--) {
+          if (stackA[length] == value) {
+            return stackB[length];
+          }
+        }
+        result = isArr ? ctor(value.length) : {};
+      }
+      else {
+        result = isArr ? slice(value) : assign({}, value);
+      }
       // add array properties assigned by `RegExp#exec`
       if (isArr) {
         if (hasOwnProperty.call(value, 'index')) {
@@ -1471,14 +1110,18 @@ define("vendor/almond", function(){});
           result.input = value.input;
         }
       }
+      // exit for shallow clone
+      if (!isDeep) {
+        return result;
+      }
       // add the source value to the stack of traversed objects
       // and associate it with its clone
       stackA.push(value);
       stackB.push(result);
 
       // recursively populate clone (susceptible to call stack limits)
-      (isArr ? baseEach : forOwn)(value, function(objValue, key) {
-        result[key] = baseClone(objValue, deep, callback, stackA, stackB);
+      (isArr ? forEach : forOwn)(value, function(objValue, key) {
+        result[key] = baseClone(objValue, isDeep, callback, stackA, stackB);
       });
 
       if (initedStack) {
@@ -1486,6 +1129,32 @@ define("vendor/almond", function(){});
         releaseArray(stackB);
       }
       return result;
+    }
+
+    /**
+     * The base implementation of `_.create` without support for assigning
+     * properties to the created object.
+     *
+     * @private
+     * @param {Object} prototype The object to inherit from.
+     * @returns {Object} Returns the new object.
+     */
+    function baseCreate(prototype, properties) {
+      return isObject(prototype) ? nativeCreate(prototype) : {};
+    }
+    // fallback for browsers without `Object.create`
+    if (!nativeCreate) {
+      baseCreate = (function() {
+        function Object() {}
+        return function(prototype) {
+          if (isObject(prototype)) {
+            Object.prototype = prototype;
+            var result = new Object;
+            Object.prototype = null;
+          }
+          return result || context.Object();
+        };
+      }());
     }
 
     /**
@@ -1502,24 +1171,30 @@ define("vendor/almond", function(){});
       if (typeof func != 'function') {
         return identity;
       }
-      // exit early if there is no `thisArg`
-      if (typeof thisArg == 'undefined') {
+      // exit early for no `thisArg` or already bound by `Function#bind`
+      if (typeof thisArg == 'undefined' || !('prototype' in func)) {
         return func;
       }
-      var bindData = func.__bindData__ || (support.funcNames && !func.name);
+      var bindData = func.__bindData__;
       if (typeof bindData == 'undefined') {
-        var source = reThis && fnToString.call(func);
-        if (!support.funcNames && source && !reFuncName.test(source)) {
-          bindData = true;
+        if (support.funcNames) {
+          bindData = !func.name;
         }
-        if (support.funcNames || !bindData) {
-          // checks if `func` references the `this` keyword and stores the result
-          bindData = !support.funcDecomp || reThis.test(source);
-          setBindData(func, bindData);
+        bindData = bindData || !support.funcDecomp;
+        if (!bindData) {
+          var source = fnToString.call(func);
+          if (!support.funcNames) {
+            bindData = !reFuncName.test(source);
+          }
+          if (!bindData) {
+            // checks if `func` references the `this` keyword and stores the result
+            bindData = reThis.test(source);
+            setBindData(func, bindData);
+          }
         }
       }
       // exit early if there are no `this` references or `func` is bound
-      if (bindData !== true && (bindData && bindData[1] & 1)) {
+      if (bindData === false || (bindData !== true && bindData[1] & 1)) {
         return func;
       }
       switch (argCount) {
@@ -1540,17 +1215,107 @@ define("vendor/almond", function(){});
     }
 
     /**
+     * The base implementation of `createWrapper` that creates the wrapper and
+     * sets its meta data.
+     *
+     * @private
+     * @param {Array} bindData The bind data array.
+     * @returns {Function} Returns the new function.
+     */
+    function baseCreateWrapper(bindData) {
+      var func = bindData[0],
+          bitmask = bindData[1],
+          partialArgs = bindData[2],
+          partialRightArgs = bindData[3],
+          thisArg = bindData[4],
+          arity = bindData[5];
+
+      var isBind = bitmask & 1,
+          isBindKey = bitmask & 2,
+          isCurry = bitmask & 4,
+          isCurryBound = bitmask & 8,
+          key = func;
+
+      function bound() {
+        var thisBinding = isBind ? thisArg : this;
+        if (partialArgs) {
+          var args = slice(partialArgs);
+          push.apply(args, arguments);
+        }
+        if (partialRightArgs || isCurry) {
+          args || (args = slice(arguments));
+          if (partialRightArgs) {
+            push.apply(args, partialRightArgs);
+          }
+          if (isCurry && args.length < arity) {
+            bitmask |= 16 & ~32;
+            return baseCreateWrapper([func, (isCurryBound ? bitmask : bitmask & ~3), args, null, thisArg, arity]);
+          }
+        }
+        args || (args = arguments);
+        if (isBindKey) {
+          func = thisBinding[key];
+        }
+        if (this instanceof bound) {
+          thisBinding = baseCreate(func.prototype);
+          var result = func.apply(thisBinding, args);
+          return isObject(result) ? result : thisBinding;
+        }
+        return func.apply(thisBinding, args);
+      }
+      setBindData(bound, bindData);
+      return bound;
+    }
+
+    /**
+     * The base implementation of `_.difference` that accepts a single array
+     * of values to exclude.
+     *
+     * @private
+     * @param {Array} array The array to process.
+     * @param {Array} [values] The array of values to exclude.
+     * @returns {Array} Returns a new array of filtered values.
+     */
+    function baseDifference(array, values) {
+      var index = -1,
+          indexOf = getIndexOf(),
+          length = array ? array.length : 0,
+          isLarge = length >= largeArraySize && indexOf === baseIndexOf,
+          result = [];
+
+      if (isLarge) {
+        var cache = createCache(values);
+        if (cache) {
+          indexOf = cacheIndexOf;
+          values = cache;
+        } else {
+          isLarge = false;
+        }
+      }
+      while (++index < length) {
+        var value = array[index];
+        if (indexOf(values, value) < 0) {
+          result.push(value);
+        }
+      }
+      if (isLarge) {
+        releaseObject(values);
+      }
+      return result;
+    }
+
+    /**
      * The base implementation of `_.flatten` without support for callback
      * shorthands or `thisArg` binding.
      *
      * @private
      * @param {Array} array The array to flatten.
      * @param {boolean} [isShallow=false] A flag to restrict flattening to a single level.
-     * @param {boolean} [isArgArrays=false] A flag to restrict flattening to arrays and `arguments` objects.
+     * @param {boolean} [isStrict=false] A flag to restrict flattening to arrays and `arguments` objects.
      * @param {number} [fromIndex=0] The index to start from.
      * @returns {Array} Returns a new flattened array.
      */
-    function baseFlatten(array, isShallow, isArgArrays, fromIndex) {
+    function baseFlatten(array, isShallow, isStrict, fromIndex) {
       var index = (fromIndex || 0) - 1,
           length = array ? array.length : 0,
           result = [];
@@ -1562,7 +1327,7 @@ define("vendor/almond", function(){});
             && (isArray(value) || isArguments(value))) {
           // recursively flatten arrays (susceptible to call stack limits)
           if (!isShallow) {
-            value = baseFlatten(value, isShallow, isArgArrays);
+            value = baseFlatten(value, isShallow, isStrict);
           }
           var valIndex = -1,
               valLength = value.length,
@@ -1572,7 +1337,7 @@ define("vendor/almond", function(){});
           while (++valIndex < valLength) {
             result[resIndex++] = value[valIndex];
           }
-        } else if (!isArgArrays) {
+        } else if (!isStrict) {
           result.push(value);
         }
       }
@@ -1655,22 +1420,25 @@ define("vendor/almond", function(){});
       var isArr = className == arrayClass;
       if (!isArr) {
         // unwrap any `lodash` wrapped values
-        if (hasOwnProperty.call(a, '__wrapped__ ') || hasOwnProperty.call(b, '__wrapped__')) {
-          return baseIsEqual(a.__wrapped__ || a, b.__wrapped__ || b, callback, isWhere, stackA, stackB);
+        var aWrapped = hasOwnProperty.call(a, '__wrapped__'),
+            bWrapped = hasOwnProperty.call(b, '__wrapped__');
+
+        if (aWrapped || bWrapped) {
+          return baseIsEqual(aWrapped ? a.__wrapped__ : a, bWrapped ? b.__wrapped__ : b, callback, isWhere, stackA, stackB);
         }
         // exit for functions and DOM nodes
-        if (className != objectClass || (!support.nodeClass && (isNode(a) || isNode(b)))) {
+        if (className != objectClass) {
           return false;
         }
         // in older versions of Opera, `arguments` objects have `Array` constructors
-        var ctorA = !support.argsObject && isArguments(a) ? Object : a.constructor,
-            ctorB = !support.argsObject && isArguments(b) ? Object : b.constructor;
+        var ctorA = a.constructor,
+            ctorB = b.constructor;
 
         // non `Object` object instances with different constructors are not equal
-        if (ctorA != ctorB && !(
-              isFunction(ctorA) && ctorA instanceof ctorA &&
-              isFunction(ctorB) && ctorB instanceof ctorB
-            )) {
+        if (ctorA != ctorB &&
+              !(isFunction(ctorA) && ctorA instanceof ctorA && isFunction(ctorB) && ctorB instanceof ctorB) &&
+              ('constructor' in a && 'constructor' in b)
+            ) {
           return false;
         }
       }
@@ -1696,51 +1464,54 @@ define("vendor/almond", function(){});
 
       // recursively compare objects and arrays (susceptible to call stack limits)
       if (isArr) {
+        // compare lengths to determine if a deep comparison is necessary
         length = a.length;
         size = b.length;
+        result = size == length;
 
-        // compare lengths to determine if a deep comparison is necessary
-        result = size == a.length;
-        if (!result && !isWhere) {
-          return result;
-        }
-        // deep compare the contents, ignoring non-numeric properties
-        while (size--) {
-          var index = length,
-              value = b[size];
+        if (result || isWhere) {
+          // deep compare the contents, ignoring non-numeric properties
+          while (size--) {
+            var index = length,
+                value = b[size];
 
-          if (isWhere) {
-            while (index--) {
-              if ((result = baseIsEqual(a[index], value, callback, isWhere, stackA, stackB))) {
-                break;
+            if (isWhere) {
+              while (index--) {
+                if ((result = baseIsEqual(a[index], value, callback, isWhere, stackA, stackB))) {
+                  break;
+                }
               }
+            } else if (!(result = baseIsEqual(a[size], value, callback, isWhere, stackA, stackB))) {
+              break;
             }
-          } else if (!(result = baseIsEqual(a[size], value, callback, isWhere, stackA, stackB))) {
-            break;
           }
         }
-        return result;
       }
-      // deep compare objects using `forIn`, instead of `forOwn`, to avoid `Object.keys`
-      // which, in this case, is more costly
-      forIn(b, function(value, key, b) {
-        if (hasOwnProperty.call(b, key)) {
-          // count the number of properties.
-          size++;
-          // deep compare each property value.
-          return (result = hasOwnProperty.call(a, key) && baseIsEqual(a[key], value, callback, isWhere, stackA, stackB));
-        }
-      });
-
-      if (result && !isWhere) {
-        // ensure both objects have the same number of properties
-        forIn(a, function(value, key, a) {
-          if (hasOwnProperty.call(a, key)) {
-            // `size` will be `-1` if `a` has more properties than `b`
-            return (result = --size > -1);
+      else {
+        // deep compare objects using `forIn`, instead of `forOwn`, to avoid `Object.keys`
+        // which, in this case, is more costly
+        forIn(b, function(value, key, b) {
+          if (hasOwnProperty.call(b, key)) {
+            // count the number of properties.
+            size++;
+            // deep compare each property value.
+            return (result = hasOwnProperty.call(a, key) && baseIsEqual(a[key], value, callback, isWhere, stackA, stackB));
           }
         });
+
+        if (result && !isWhere) {
+          // ensure both objects have the same number of properties
+          forIn(a, function(value, key, a) {
+            if (hasOwnProperty.call(a, key)) {
+              // `size` will be `-1` if `a` has more properties than `b`
+              return (result = --size > -1);
+            }
+          });
+        }
       }
+      stackA.pop();
+      stackB.pop();
+
       if (initedStack) {
         releaseArray(stackA);
         releaseArray(stackB);
@@ -1814,6 +1585,19 @@ define("vendor/almond", function(){});
     }
 
     /**
+     * The base implementation of `_.random` without argument juggling or support
+     * for returning floating-point numbers.
+     *
+     * @private
+     * @param {number} min The minimum possible value.
+     * @param {number} max The maximum possible value.
+     * @returns {number} Returns a random number.
+     */
+    function baseRandom(min, max) {
+      return min + floor(nativeRandom() * (max - min + 1));
+    }
+
+    /**
      * The base implementation of `_.uniq` without support for callback shorthands
      * or `thisArg` binding.
      *
@@ -1834,13 +1618,8 @@ define("vendor/almond", function(){});
 
       if (isLarge) {
         var cache = createCache(seen);
-        if (cache) {
-          indexOf = cacheIndexOf;
-          seen = cache;
-        } else {
-          isLarge = false;
-          seen = callback ? seen : (releaseArray(seen), result);
-        }
+        indexOf = cacheIndexOf;
+        seen = cache;
       }
       while (++index < length) {
         var value = array[index],
@@ -1880,16 +1659,16 @@ define("vendor/almond", function(){});
         var result = {};
         callback = lodash.createCallback(callback, thisArg, 3);
 
-        if (isArray(collection)) {
-          var index = -1,
-              length = collection.length;
+        var index = -1,
+            length = collection ? collection.length : 0;
 
+        if (typeof length == 'number') {
           while (++index < length) {
             var value = collection[index];
             setter(result, value, callback(value, index, collection), collection);
           }
         } else {
-          baseEach(collection, function(value, key, collection) {
+          forOwn(collection, function(value, key, collection) {
             setter(result, value, callback(value, key, collection), collection);
           });
         }
@@ -1917,16 +1696,15 @@ define("vendor/almond", function(){});
      *  provided to the new function.
      * @param {*} [thisArg] The `this` binding of `func`.
      * @param {number} [arity] The arity of `func`.
-     * @returns {Function} Returns the new bound function.
+     * @returns {Function} Returns the new function.
      */
-    function createBound(func, bitmask, partialArgs, partialRightArgs, thisArg, arity) {
+    function createWrapper(func, bitmask, partialArgs, partialRightArgs, thisArg, arity) {
       var isBind = bitmask & 1,
           isBindKey = bitmask & 2,
           isCurry = bitmask & 4,
           isCurryBound = bitmask & 8,
           isPartial = bitmask & 16,
-          isPartialRight = bitmask & 32,
-          key = func;
+          isPartialRight = bitmask & 32;
 
       if (!isBindKey && !isFunction(func)) {
         throw new TypeError;
@@ -1940,149 +1718,42 @@ define("vendor/almond", function(){});
         isPartialRight = partialRightArgs = false;
       }
       var bindData = func && func.__bindData__;
-      if (bindData) {
+      if (bindData && bindData !== true) {
+        // clone `bindData`
+        bindData = slice(bindData);
+        if (bindData[2]) {
+          bindData[2] = slice(bindData[2]);
+        }
+        if (bindData[3]) {
+          bindData[3] = slice(bindData[3]);
+        }
+        // set `thisBinding` is not previously bound
         if (isBind && !(bindData[1] & 1)) {
           bindData[4] = thisArg;
         }
+        // set if previously bound but not currently (subsequent curried functions)
         if (!isBind && bindData[1] & 1) {
           bitmask |= 8;
         }
+        // set curried arity if not yet set
         if (isCurry && !(bindData[1] & 4)) {
           bindData[5] = arity;
         }
+        // append partial left arguments
         if (isPartial) {
           push.apply(bindData[2] || (bindData[2] = []), partialArgs);
         }
+        // append partial right arguments
         if (isPartialRight) {
-          push.apply(bindData[3] || (bindData[3] = []), partialRightArgs);
+          unshift.apply(bindData[3] || (bindData[3] = []), partialRightArgs);
         }
+        // merge flags
         bindData[1] |= bitmask;
-        return createBound.apply(null, bindData);
+        return createWrapper.apply(null, bindData);
       }
-      // use `Function#bind` if it exists and is fast
-      // (in V8 `Function#bind` is slower except when partially applied)
-      if (isBind && !(isBindKey || isCurry || isPartialRight) &&
-          (support.fastBind || (nativeBind && isPartial))) {
-        if (isPartial) {
-          var args = [thisArg];
-          push.apply(args, partialArgs);
-        }
-        var bound = isPartial
-          ? nativeBind.apply(func, args)
-          : nativeBind.call(func, thisArg);
-      }
-      else {
-        bound = function() {
-          // `Function#bind` spec
-          // http://es5.github.io/#x15.3.4.5
-          var args = arguments,
-              thisBinding = isBind ? thisArg : this;
-
-          if (isCurry || isPartial || isPartialRight) {
-            args = nativeSlice.call(args);
-            if (isPartial) {
-              unshift.apply(args, partialArgs);
-            }
-            if (isPartialRight) {
-              push.apply(args, partialRightArgs);
-            }
-            if (isCurry && args.length < arity) {
-              bitmask |= 16 & ~32;
-              return createBound(func, (isCurryBound ? bitmask : bitmask & ~3), args, null, thisArg, arity);
-            }
-          }
-          if (isBindKey) {
-            func = thisBinding[key];
-          }
-          if (this instanceof bound) {
-            // ensure `new bound` is an instance of `func`
-            thisBinding = createObject(func.prototype);
-
-            // mimic the constructor's `return` behavior
-            // http://es5.github.io/#x13.2.2
-            var result = func.apply(thisBinding, args);
-            return isObject(result) ? result : thisBinding;
-          }
-          return func.apply(thisBinding, args);
-        };
-      }
-      setBindData(bound, nativeSlice.call(arguments));
-      return bound;
-    }
-
-    /**
-     * Creates compiled iteration functions.
-     *
-     * @private
-     * @param {...Object} [options] The compile options object(s).
-     * @param {string} [options.array] Code to determine if the iterable is an array or array-like.
-     * @param {boolean} [options.useHas] Specify using `hasOwnProperty` checks in the object loop.
-     * @param {Function} [options.keys] A reference to `_.keys` for use in own property iteration.
-     * @param {string} [options.args] A comma separated string of iteration function arguments.
-     * @param {string} [options.top] Code to execute before the iteration branches.
-     * @param {string} [options.loop] Code to execute in the object loop.
-     * @param {string} [options.bottom] Code to execute after the iteration branches.
-     * @returns {Function} Returns the compiled function.
-     */
-    function createIterator() {
-      var data = getObject();
-
-      // data properties
-      data.shadowedProps = shadowedProps;
-      data.support = support;
-
-      // iterator options
-      data.array = data.bottom = data.loop = data.top = '';
-      data.init = 'iterable';
-      data.useHas = true;
-
-      // merge options into a template data object
-      for (var object, index = 0; object = arguments[index]; index++) {
-        for (var key in object) {
-          data[key] = object[key];
-        }
-      }
-      var args = data.args;
-      data.firstArg = /^[^,]+/.exec(args)[0];
-
-      // create the function factory
-      var factory = Function(
-          'baseCreateCallback, errorClass, errorProto, hasOwnProperty, ' +
-          'indicatorObject, isArguments, isArray, isString, keys, objectProto, ' +
-          'objectTypes, nonEnumProps, stringClass, stringProto, toString',
-        'return function(' + args + ') {\n' + iteratorTemplate(data) + '\n}'
-      );
-
-      releaseObject(data);
-
-      // return the compiled function
-      return factory(
-        baseCreateCallback, errorClass, errorProto, hasOwnProperty,
-        indicatorObject, isArguments, isArray, isString, data.keys, objectProto,
-        objectTypes, nonEnumProps, stringClass, stringProto, toString
-      );
-    }
-
-    /**
-     * Creates a new object with the specified `prototype`.
-     *
-     * @private
-     * @param {Object} prototype The prototype object.
-     * @returns {Object} Returns the new object.
-     */
-    function createObject(prototype) {
-      return isObject(prototype) ? nativeCreate(prototype) : {};
-    }
-    // fallback for browsers without `Object.create`
-    if (!nativeCreate) {
-      createObject = function(prototype) {
-        if (isObject(prototype)) {
-          noop.prototype = prototype;
-          var result = new noop;
-          noop.prototype = null;
-        }
-        return result || {};
-      };
+      // fast path for `_.bind`
+      var creater = (bitmask == 1 || bitmask === 17) ? baseBind : baseCreateWrapper;
+      return creater([func, bitmask, partialArgs, partialRightArgs, thisArg, arity]);
     }
 
     /**
@@ -2110,17 +1781,26 @@ define("vendor/almond", function(){});
     }
 
     /**
+     * Checks if `value` is a native function.
+     *
+     * @private
+     * @param {*} value The value to check.
+     * @returns {boolean} Returns `true` if the `value` is a native function, else `false`.
+     */
+    function isNative(value) {
+      return typeof value == 'function' && reNative.test(value);
+    }
+
+    /**
      * Sets `this` binding data on a given function.
      *
      * @private
      * @param {Function} func The function to set data on.
-     * @param {*} value The value to set.
+     * @param {Array} value The data array to set.
      */
     var setBindData = !defineProperty ? noop : function(func, value) {
-      var descriptor = getObject();
       descriptor.value = value;
       defineProperty(func, '__bindData__', descriptor);
-      releaseObject(descriptor);
     };
 
     /**
@@ -2139,20 +1819,8 @@ define("vendor/almond", function(){});
 
       // avoid non Object objects, `arguments` objects, and DOM elements
       if (!(value && toString.call(value) == objectClass) ||
-          (ctor = value.constructor, isFunction(ctor) && !(ctor instanceof ctor)) ||
-          (!support.argsClass && isArguments(value)) ||
-          (!support.nodeClass && isNode(value))) {
+          (ctor = value.constructor, isFunction(ctor) && !(ctor instanceof ctor))) {
         return false;
-      }
-      // IE < 9 iterates inherited properties before own properties. If the first
-      // iterated property is an object's own property then there are no inherited
-      // enumerable properties.
-      if (support.ownLast) {
-        forIn(value, function(value, key, object) {
-          result = hasOwnProperty.call(object, key);
-          return false;
-        });
-        return result !== false;
       }
       // In most environments an object's own properties are iterated before
       // its inherited properties. If the last iterated property is an object's
@@ -2196,13 +1864,6 @@ define("vendor/almond", function(){});
       return value && typeof value == 'object' && typeof value.length == 'number' &&
         toString.call(value) == argsClass || false;
     }
-    // fallback for browsers that can't detect `arguments` objects by [[Class]]
-    if (!support.argsClass) {
-      isArguments = function(value) {
-        return value && typeof value == 'object' && typeof value.length == 'number' &&
-          hasOwnProperty.call(value, 'callee') || false;
-      };
-    }
 
     /**
      * Checks if `value` is an array.
@@ -2235,12 +1896,17 @@ define("vendor/almond", function(){});
      * @param {Object} object The object to inspect.
      * @returns {Array} Returns an array of property names.
      */
-    var shimKeys = createIterator({
-      'args': 'object',
-      'init': '[]',
-      'top': 'if (!(objectTypes[typeof object])) return result',
-      'loop': 'result.push(index)'
-    });
+    var shimKeys = function(object) {
+      var index, iterable = object, result = [];
+      if (!iterable) return result;
+      if (!(objectTypes[typeof object])) return result;
+        for (index in iterable) {
+          if (hasOwnProperty.call(iterable, index)) {
+            result.push(index);
+          }
+        }
+      return result
+    };
 
     /**
      * Creates an array composed of the own enumerable property names of an object.
@@ -2259,41 +1925,7 @@ define("vendor/almond", function(){});
       if (!isObject(object)) {
         return [];
       }
-      if ((support.enumPrototypes && typeof object == 'function') ||
-          (support.nonEnumArgs && object.length && isArguments(object))) {
-        return shimKeys(object);
-      }
       return nativeKeys(object);
-    };
-
-    /** Reusable iterator options shared by `each`, `forIn`, and `forOwn` */
-    var eachIteratorOptions = {
-      'args': 'collection, callback, thisArg',
-      'top': "callback = callback && typeof thisArg == 'undefined' ? callback : baseCreateCallback(callback, thisArg, 3)",
-      'array': "typeof length == 'number'",
-      'keys': keys,
-      'loop': 'if (callback(iterable[index], index, collection) === false) return result'
-    };
-
-    /** Reusable iterator options for `assign` and `defaults` */
-    var defaultsIteratorOptions = {
-      'args': 'object, source, guard',
-      'top':
-        'var args = arguments,\n' +
-        '    argsIndex = 0,\n' +
-        "    argsLength = typeof guard == 'number' ? 2 : args.length;\n" +
-        'while (++argsIndex < argsLength) {\n' +
-        '  iterable = args[argsIndex];\n' +
-        '  if (iterable && objectTypes[typeof iterable]) {',
-      'keys': keys,
-      'loop': "if (typeof result[index] == 'undefined') result[index] = iterable[index]",
-      'bottom': '  }\n}'
-    };
-
-    /** Reusable iterator options for `forIn` and `forOwn` */
-    var forOwnIteratorOptions = {
-      'top': 'if (!objectTypes[typeof iterable]) return result;\n' + eachIteratorOptions.top,
-      'array': false
     };
 
     /**
@@ -2319,22 +1951,6 @@ define("vendor/almond", function(){});
     var reEscapedHtml = RegExp('(' + keys(htmlUnescapes).join('|') + ')', 'g'),
         reUnescapedHtml = RegExp('[' + keys(htmlEscapes).join('') + ']', 'g');
 
-    /**
-     * A function compiled to iterate `arguments` objects, arrays, objects, and
-     * strings consistenly across environments, executing the callback for each
-     * element in the collection. The callback is bound to `thisArg` and invoked
-     * with three arguments; (value, index|key, collection). Callbacks may exit
-     * iteration early by explicitly returning `false`.
-     *
-     * @private
-     * @type Function
-     * @param {Array|Object|string} collection The collection to iterate over.
-     * @param {Function} [callback=identity] The function called per iteration.
-     * @param {*} [thisArg] The `this` binding of `callback`.
-     * @returns {Array|Object|string} Returns `collection`.
-     */
-    var baseEach = createIterator(eachIteratorOptions);
-
     /*--------------------------------------------------------------------------*/
 
     /**
@@ -2356,32 +1972,46 @@ define("vendor/almond", function(){});
      * @returns {Object} Returns the destination object.
      * @example
      *
-     * _.assign({ 'name': 'moe' }, { 'age': 40 });
-     * // => { 'name': 'moe', 'age': 40 }
+     * _.assign({ 'name': 'fred' }, { 'employer': 'slate' });
+     * // => { 'name': 'fred', 'employer': 'slate' }
      *
      * var defaults = _.partialRight(_.assign, function(a, b) {
      *   return typeof a == 'undefined' ? b : a;
      * });
      *
-     * var food = { 'name': 'apple' };
-     * defaults(food, { 'name': 'banana', 'type': 'fruit' });
-     * // => { 'name': 'apple', 'type': 'fruit' }
+     * var object = { 'name': 'barney' };
+     * defaults(object, { 'name': 'fred', 'employer': 'slate' });
+     * // => { 'name': 'barney', 'employer': 'slate' }
      */
-    var assign = createIterator(defaultsIteratorOptions, {
-      'top':
-        defaultsIteratorOptions.top.replace(';',
-          ';\n' +
-          "if (argsLength > 3 && typeof args[argsLength - 2] == 'function') {\n" +
-          '  var callback = baseCreateCallback(args[--argsLength - 1], args[argsLength--], 2);\n' +
-          "} else if (argsLength > 2 && typeof args[argsLength - 1] == 'function') {\n" +
-          '  callback = args[--argsLength];\n' +
-          '}'
-        ),
-      'loop': 'result[index] = callback ? callback(result[index], iterable[index]) : iterable[index]'
-    });
+    var assign = function(object, source, guard) {
+      var index, iterable = object, result = iterable;
+      if (!iterable) return result;
+      var args = arguments,
+          argsIndex = 0,
+          argsLength = typeof guard == 'number' ? 2 : args.length;
+      if (argsLength > 3 && typeof args[argsLength - 2] == 'function') {
+        var callback = baseCreateCallback(args[--argsLength - 1], args[argsLength--], 2);
+      } else if (argsLength > 2 && typeof args[argsLength - 1] == 'function') {
+        callback = args[--argsLength];
+      }
+      while (++argsIndex < argsLength) {
+        iterable = args[argsIndex];
+        if (iterable && objectTypes[typeof iterable]) {
+        var ownIndex = -1,
+            ownProps = objectTypes[typeof iterable] && keys(iterable),
+            length = ownProps ? ownProps.length : 0;
+
+        while (++ownIndex < length) {
+          index = ownProps[ownIndex];
+          result[index] = callback ? callback(result[index], iterable[index]) : iterable[index];
+        }
+        }
+      }
+      return result
+    };
 
     /**
-     * Creates a clone of `value`. If `deep` is `true` nested objects will also
+     * Creates a clone of `value`. If `isDeep` is `true` nested objects will also
      * be cloned, otherwise they will be assigned by reference. If a callback
      * is provided it will be executed to produce the cloned values. If the
      * callback returns `undefined` cloning will be handled by the method instead.
@@ -2391,23 +2021,23 @@ define("vendor/almond", function(){});
      * @memberOf _
      * @category Objects
      * @param {*} value The value to clone.
-     * @param {boolean} [deep=false] Specify a deep clone.
+     * @param {boolean} [isDeep=false] Specify a deep clone.
      * @param {Function} [callback] The function to customize cloning values.
      * @param {*} [thisArg] The `this` binding of `callback`.
-     * @returns {*} Returns the cloned `value`.
+     * @returns {*} Returns the cloned value.
      * @example
      *
-     * var stooges = [
-     *   { 'name': 'moe', 'age': 40 },
-     *   { 'name': 'larry', 'age': 50 }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36 },
+     *   { 'name': 'fred',   'age': 40 }
      * ];
      *
-     * var shallow = _.clone(stooges);
-     * shallow[0] === stooges[0];
+     * var shallow = _.clone(characters);
+     * shallow[0] === characters[0];
      * // => true
      *
-     * var deep = _.clone(stooges, true);
-     * deep[0] === stooges[0];
+     * var deep = _.clone(characters, true);
+     * deep[0] === characters[0];
      * // => false
      *
      * _.mixin({
@@ -2420,15 +2050,15 @@ define("vendor/almond", function(){});
      * clone.childNodes.length;
      * // => 0
      */
-    function clone(value, deep, callback, thisArg) {
+    function clone(value, isDeep, callback, thisArg) {
       // allows working with "Collections" methods without using their `index`
-      // and `collection` arguments for `deep` and `callback`
-      if (typeof deep != 'boolean' && deep != null) {
+      // and `collection` arguments for `isDeep` and `callback`
+      if (typeof isDeep != 'boolean' && isDeep != null) {
         thisArg = callback;
-        callback = deep;
-        deep = false;
+        callback = isDeep;
+        isDeep = false;
       }
-      return baseClone(value, deep, typeof callback == 'function' && baseCreateCallback(callback, thisArg, 1));
+      return baseClone(value, isDeep, typeof callback == 'function' && baseCreateCallback(callback, thisArg, 1));
     }
 
     /**
@@ -2448,16 +2078,16 @@ define("vendor/almond", function(){});
      * @param {*} value The value to deep clone.
      * @param {Function} [callback] The function to customize cloning values.
      * @param {*} [thisArg] The `this` binding of `callback`.
-     * @returns {*} Returns the deep cloned `value`.
+     * @returns {*} Returns the deep cloned value.
      * @example
      *
-     * var stooges = [
-     *   { 'name': 'moe', 'age': 40 },
-     *   { 'name': 'larry', 'age': 50 }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36 },
+     *   { 'name': 'fred',   'age': 40 }
      * ];
      *
-     * var deep = _.cloneDeep(stooges);
-     * deep[0] === stooges[0];
+     * var deep = _.cloneDeep(characters);
+     * deep[0] === characters[0];
      * // => false
      *
      * var view = {
@@ -2477,6 +2107,42 @@ define("vendor/almond", function(){});
     }
 
     /**
+     * Creates an object that inherits from the given `prototype` object. If a
+     * `properties` object is provided its own enumerable properties are assigned
+     * to the created object.
+     *
+     * @static
+     * @memberOf _
+     * @category Objects
+     * @param {Object} prototype The object to inherit from.
+     * @param {Object} [properties] The properties to assign to the object.
+     * @returns {Object} Returns the new object.
+     * @example
+     *
+     * function Shape() {
+     *   this.x = 0;
+     *   this.y = 0;
+     * }
+     *
+     * function Circle() {
+     *   Shape.call(this);
+     * }
+     *
+     * Circle.prototype = _.create(Shape.prototype, { 'constructor': Circle });
+     *
+     * var circle = new Circle;
+     * circle instanceof Circle;
+     * // => true
+     *
+     * circle instanceof Shape;
+     * // => true
+     */
+    function create(prototype, properties) {
+      var result = baseCreate(prototype);
+      return properties ? assign(result, properties) : result;
+    }
+
+    /**
      * Assigns own enumerable properties of source object(s) to the destination
      * object for all destination properties that resolve to `undefined`. Once a
      * property is set, additional defaults of the same property will be ignored.
@@ -2492,15 +2158,42 @@ define("vendor/almond", function(){});
      * @returns {Object} Returns the destination object.
      * @example
      *
-     * var food = { 'name': 'apple' };
-     * _.defaults(food, { 'name': 'banana', 'type': 'fruit' });
-     * // => { 'name': 'apple', 'type': 'fruit' }
+     * var object = { 'name': 'barney' };
+     * _.defaults(object, { 'name': 'fred', 'employer': 'slate' });
+     * // => { 'name': 'barney', 'employer': 'slate' }
      */
-    var defaults = createIterator(defaultsIteratorOptions);
+    var defaults = function(object, source, guard) {
+      var index, iterable = object, result = iterable;
+      if (!iterable) return result;
+      var args = arguments,
+          argsIndex = 0,
+          argsLength = typeof guard == 'number' ? 2 : args.length;
+      while (++argsIndex < argsLength) {
+        iterable = args[argsIndex];
+        if (iterable && objectTypes[typeof iterable]) {
+        var ownIndex = -1,
+            ownProps = objectTypes[typeof iterable] && keys(iterable),
+            length = ownProps ? ownProps.length : 0;
+
+        while (++ownIndex < length) {
+          index = ownProps[ownIndex];
+          if (typeof result[index] == 'undefined') result[index] = iterable[index];
+        }
+        }
+      }
+      return result
+    };
 
     /**
      * This method is like `_.findIndex` except that it returns the key of the
      * first element that passes the callback check, instead of the element itself.
+     *
+     * If a property name is provided for `callback` the created "_.pluck" style
+     * callback will return the property value of the given element.
+     *
+     * If an object is provided for `callback` the created "_.where" style callback
+     * will return `true` for elements that have the properties of the given object,
+     * else `false`.
      *
      * @static
      * @memberOf _
@@ -2513,10 +2206,24 @@ define("vendor/almond", function(){});
      * @returns {string|undefined} Returns the key of the found element, else `undefined`.
      * @example
      *
-     * _.findKey({ 'a': 1, 'b': 2, 'c': 3, 'd': 4 }, function(num) {
-     *   return num % 2 == 0;
+     * var characters = {
+     *   'barney': {  'age': 36, 'blocked': false },
+     *   'fred': {    'age': 40, 'blocked': true },
+     *   'pebbles': { 'age': 1,  'blocked': false }
+     * };
+     *
+     * _.findKey(characters, function(chr) {
+     *   return chr.age < 40;
      * });
-     * // => 'b' (property order is not guaranteed across environments)
+     * // => 'barney' (property order is not guaranteed across environments)
+     *
+     * // using "_.where" callback shorthand
+     * _.findKey(characters, { 'age': 1 });
+     * // => 'pebbles'
+     *
+     * // using "_.pluck" callback shorthand
+     * _.findKey(characters, 'blocked');
+     * // => 'fred'
      */
     function findKey(object, callback, thisArg) {
       var result;
@@ -2534,6 +2241,13 @@ define("vendor/almond", function(){});
      * This method is like `_.findKey` except that it iterates over elements
      * of a `collection` in the opposite order.
      *
+     * If a property name is provided for `callback` the created "_.pluck" style
+     * callback will return the property value of the given element.
+     *
+     * If an object is provided for `callback` the created "_.where" style callback
+     * will return `true` for elements that have the properties of the given object,
+     * else `false`.
+     *
      * @static
      * @memberOf _
      * @category Objects
@@ -2545,10 +2259,24 @@ define("vendor/almond", function(){});
      * @returns {string|undefined} Returns the key of the found element, else `undefined`.
      * @example
      *
-     * _.findLastKey({ 'a': 1, 'b': 2, 'c': 3, 'd': 4 }, function(num) {
-     *   return num % 2 == 1;
+     * var characters = {
+     *   'barney': {  'age': 36, 'blocked': true },
+     *   'fred': {    'age': 40, 'blocked': false },
+     *   'pebbles': { 'age': 1,  'blocked': true }
+     * };
+     *
+     * _.findLastKey(characters, function(chr) {
+     *   return chr.age < 40;
      * });
-     * // => returns `c`, assuming `_.findKey` returns `a`
+     * // => returns `pebbles`, assuming `_.findKey` returns `barney`
+     *
+     * // using "_.where" callback shorthand
+     * _.findLastKey(characters, { 'age': 40 });
+     * // => 'fred'
+     *
+     * // using "_.pluck" callback shorthand
+     * _.findLastKey(characters, 'blocked');
+     * // => 'pebbles'
      */
     function findLastKey(object, callback, thisArg) {
       var result;
@@ -2578,22 +2306,31 @@ define("vendor/almond", function(){});
      * @returns {Object} Returns `object`.
      * @example
      *
-     * function Dog(name) {
-     *   this.name = name;
+     * function Shape() {
+     *   this.x = 0;
+     *   this.y = 0;
      * }
      *
-     * Dog.prototype.bark = function() {
-     *   console.log('Woof, woof!');
+     * Shape.prototype.move = function(x, y) {
+     *   this.x += x;
+     *   this.y += y;
      * };
      *
-     * _.forIn(new Dog('Dagny'), function(value, key) {
+     * _.forIn(new Shape, function(value, key) {
      *   console.log(key);
      * });
-     * // => logs 'bark' and 'name' (property order is not guaranteed across environments)
+     * // => logs 'x', 'y', and 'move' (property order is not guaranteed across environments)
      */
-    var forIn = createIterator(eachIteratorOptions, forOwnIteratorOptions, {
-      'useHas': false
-    });
+    var forIn = function(collection, callback, thisArg) {
+      var index, iterable = collection, result = iterable;
+      if (!iterable) return result;
+      if (!objectTypes[typeof iterable]) return result;
+      callback = callback && typeof thisArg == 'undefined' ? callback : baseCreateCallback(callback, thisArg, 3);
+        for (index in iterable) {
+          if (callback(iterable[index], index, collection) === false) return result;
+        }
+      return result
+    };
 
     /**
      * This method is like `_.forIn` except that it iterates over elements
@@ -2608,18 +2345,20 @@ define("vendor/almond", function(){});
      * @returns {Object} Returns `object`.
      * @example
      *
-     * function Dog(name) {
-     *   this.name = name;
+     * function Shape() {
+     *   this.x = 0;
+     *   this.y = 0;
      * }
      *
-     * Dog.prototype.bark = function() {
-     *   console.log('Woof, woof!');
+     * Shape.prototype.move = function(x, y) {
+     *   this.x += x;
+     *   this.y += y;
      * };
      *
-     * _.forInRight(new Dog('Dagny'), function(value, key) {
+     * _.forInRight(new Shape, function(value, key) {
      *   console.log(key);
      * });
-     * // => logs 'name' and 'bark' assuming `_.forIn ` logs 'bark' and 'name'
+     * // => logs 'move', 'y', and 'x' assuming `_.forIn ` logs 'x', 'y', and 'move'
      */
     function forInRight(object, callback, thisArg) {
       var pairs = [];
@@ -2659,7 +2398,21 @@ define("vendor/almond", function(){});
      * });
      * // => logs '0', '1', and 'length' (property order is not guaranteed across environments)
      */
-    var forOwn = createIterator(eachIteratorOptions, forOwnIteratorOptions);
+    var forOwn = function(collection, callback, thisArg) {
+      var index, iterable = collection, result = iterable;
+      if (!iterable) return result;
+      if (!objectTypes[typeof iterable]) return result;
+      callback = callback && typeof thisArg == 'undefined' ? callback : baseCreateCallback(callback, thisArg, 3);
+        var ownIndex = -1,
+            ownProps = objectTypes[typeof iterable] && keys(iterable),
+            length = ownProps ? ownProps.length : 0;
+
+        while (++ownIndex < length) {
+          index = ownProps[ownIndex];
+          if (callback(iterable[index], index, collection) === false) return result;
+        }
+      return result
+    };
 
     /**
      * This method is like `_.forOwn` except that it iterates over elements
@@ -2719,22 +2472,22 @@ define("vendor/almond", function(){});
     }
 
     /**
-     * Checks if the specified object `property` exists and is a direct property,
+     * Checks if the specified property name exists as a direct property of `object`,
      * instead of an inherited property.
      *
      * @static
      * @memberOf _
      * @category Objects
-     * @param {Object} object The object to check.
-     * @param {string} property The property to check for.
+     * @param {Object} object The object to inspect.
+     * @param {string} key The name of the property to check.
      * @returns {boolean} Returns `true` if key is a direct property, else `false`.
      * @example
      *
      * _.has({ 'a': 1, 'b': 2, 'c': 3 }, 'b');
      * // => true
      */
-    function has(object, property) {
-      return object ? hasOwnProperty.call(object, property) : false;
+    function has(object, key) {
+      return object ? hasOwnProperty.call(object, key) : false;
     }
 
     /**
@@ -2747,8 +2500,8 @@ define("vendor/almond", function(){});
      * @returns {Object} Returns the created inverted object.
      * @example
      *
-     *  _.invert({ 'first': 'moe', 'second': 'larry' });
-     * // => { 'moe': 'first', 'larry': 'second' }
+     * _.invert({ 'first': 'fred', 'second': 'barney' });
+     * // => { 'fred': 'first', 'barney': 'second' }
      */
     function invert(object) {
       var index = -1,
@@ -2777,7 +2530,8 @@ define("vendor/almond", function(){});
      * // => false
      */
     function isBoolean(value) {
-      return value === true || value === false || toString.call(value) == boolClass;
+      return value === true || value === false ||
+        value && typeof value == 'object' && toString.call(value) == boolClass || false;
     }
 
     /**
@@ -2794,7 +2548,7 @@ define("vendor/almond", function(){});
      * // => true
      */
     function isDate(value) {
-      return value ? (typeof value == 'object' && toString.call(value) == dateClass) : false;
+      return value && typeof value == 'object' && toString.call(value) == dateClass || false;
     }
 
     /**
@@ -2811,7 +2565,7 @@ define("vendor/almond", function(){});
      * // => true
      */
     function isElement(value) {
-      return value ? value.nodeType === 1 : false;
+      return value && value.nodeType === 1 || false;
     }
 
     /**
@@ -2843,8 +2597,7 @@ define("vendor/almond", function(){});
       var className = toString.call(value),
           length = value.length;
 
-      if ((className == arrayClass || className == stringClass ||
-          (support.argsClass ? className == argsClass : isArguments(value))) ||
+      if ((className == arrayClass || className == stringClass || className == argsClass ) ||
           (className == objectClass && typeof length == 'number' && isFunction(value.splice))) {
         return !length;
       }
@@ -2871,13 +2624,13 @@ define("vendor/almond", function(){});
      * @returns {boolean} Returns `true` if the values are equivalent, else `false`.
      * @example
      *
-     * var moe = { 'name': 'moe', 'age': 40 };
-     * var copy = { 'name': 'moe', 'age': 40 };
+     * var object = { 'name': 'fred' };
+     * var copy = { 'name': 'fred' };
      *
-     * moe == copy;
+     * object == copy;
      * // => false
      *
-     * _.isEqual(moe, copy);
+     * _.isEqual(object, copy);
      * // => true
      *
      * var words = ['hello', 'goodbye'];
@@ -2943,12 +2696,6 @@ define("vendor/almond", function(){});
      */
     function isFunction(value) {
       return typeof value == 'function';
-    }
-    // fallback for older versions of Chrome and Safari
-    if (isFunction(/x/)) {
-      isFunction = function(value) {
-        return typeof value == 'function' && toString.call(value) == funcClass;
-      };
     }
 
     /**
@@ -3046,7 +2793,8 @@ define("vendor/almond", function(){});
      * // => true
      */
     function isNumber(value) {
-      return typeof value == 'number' || toString.call(value) == numberClass;
+      return typeof value == 'number' ||
+        value && typeof value == 'object' && toString.call(value) == numberClass || false;
     }
 
     /**
@@ -3059,26 +2807,26 @@ define("vendor/almond", function(){});
      * @returns {boolean} Returns `true` if `value` is a plain object, else `false`.
      * @example
      *
-     * function Stooge(name, age) {
-     *   this.name = name;
-     *   this.age = age;
+     * function Shape() {
+     *   this.x = 0;
+     *   this.y = 0;
      * }
      *
-     * _.isPlainObject(new Stooge('moe', 40));
+     * _.isPlainObject(new Shape);
      * // => false
      *
      * _.isPlainObject([1, 2, 3]);
      * // => false
      *
-     * _.isPlainObject({ 'name': 'moe', 'age': 40 });
+     * _.isPlainObject({ 'x': 0, 'y': 0 });
      * // => true
      */
     var isPlainObject = !getPrototypeOf ? shimIsPlainObject : function(value) {
-      if (!(value && toString.call(value) == objectClass) || (!support.argsClass && isArguments(value))) {
+      if (!(value && toString.call(value) == objectClass)) {
         return false;
       }
       var valueOf = value.valueOf,
-          objProto = typeof valueOf == 'function' && (objProto = getPrototypeOf(valueOf)) && getPrototypeOf(objProto);
+          objProto = isNative(valueOf) && (objProto = getPrototypeOf(valueOf)) && getPrototypeOf(objProto);
 
       return objProto
         ? (value == objProto || getPrototypeOf(value) == objProto)
@@ -3095,11 +2843,11 @@ define("vendor/almond", function(){});
      * @returns {boolean} Returns `true` if the `value` is a regular expression, else `false`.
      * @example
      *
-     * _.isRegExp(/moe/);
+     * _.isRegExp(/fred/);
      * // => true
      */
     function isRegExp(value) {
-      return (value && objectTypes[typeof value]) ? toString.call(value) == regexpClass : false;
+      return value && typeof value == 'object' && toString.call(value) == regexpClass || false;
     }
 
     /**
@@ -3112,11 +2860,12 @@ define("vendor/almond", function(){});
      * @returns {boolean} Returns `true` if the `value` is a string, else `false`.
      * @example
      *
-     * _.isString('moe');
+     * _.isString('fred');
      * // => true
      */
     function isString(value) {
-      return typeof value == 'string' || toString.call(value) == stringClass;
+      return typeof value == 'string' ||
+        value && typeof value == 'object' && toString.call(value) == stringClass || false;
     }
 
     /**
@@ -3134,6 +2883,52 @@ define("vendor/almond", function(){});
      */
     function isUndefined(value) {
       return typeof value == 'undefined';
+    }
+
+    /**
+     * Creates an object with the same keys as `object` and values generated by
+     * running each own enumerable property of `object` through the callback.
+     * The callback is bound to `thisArg` and invoked with three arguments;
+     * (value, key, object).
+     *
+     * If a property name is provided for `callback` the created "_.pluck" style
+     * callback will return the property value of the given element.
+     *
+     * If an object is provided for `callback` the created "_.where" style callback
+     * will return `true` for elements that have the properties of the given object,
+     * else `false`.
+     *
+     * @static
+     * @memberOf _
+     * @category Objects
+     * @param {Object} object The object to iterate over.
+     * @param {Function|Object|string} [callback=identity] The function called
+     *  per iteration. If a property name or object is provided it will be used
+     *  to create a "_.pluck" or "_.where" style callback, respectively.
+     * @param {*} [thisArg] The `this` binding of `callback`.
+     * @returns {Array} Returns a new object with values of the results of each `callback` execution.
+     * @example
+     *
+     * _.mapValues({ 'a': 1, 'b': 2, 'c': 3} , function(num) { return num * 3; });
+     * // => { 'a': 3, 'b': 6, 'c': 9 }
+     *
+     * var characters = {
+     *   'fred': { 'name': 'fred', 'age': 40 },
+     *   'pebbles': { 'name': 'pebbles', 'age': 1 }
+     * };
+     *
+     * // using "_.pluck" callback shorthand
+     * _.mapValues(characters, 'age');
+     * // => { 'fred': 40, 'pebbles': 1 }
+     */
+    function mapValues(object, callback, thisArg) {
+      var result = {};
+      callback = lodash.createCallback(callback, thisArg, 3);
+
+      forOwn(object, function(value, key, object) {
+        result[key] = callback(value, key, object);
+      });
+      return result;
     }
 
     /**
@@ -3156,21 +2951,21 @@ define("vendor/almond", function(){});
      * @example
      *
      * var names = {
-     *   'stooges': [
-     *     { 'name': 'moe' },
-     *     { 'name': 'larry' }
+     *   'characters': [
+     *     { 'name': 'barney' },
+     *     { 'name': 'fred' }
      *   ]
      * };
      *
      * var ages = {
-     *   'stooges': [
-     *     { 'age': 40 },
-     *     { 'age': 50 }
+     *   'characters': [
+     *     { 'age': 36 },
+     *     { 'age': 40 }
      *   ]
      * };
      *
      * _.merge(names, ages);
-     * // => { 'stooges': [{ 'name': 'moe', 'age': 40 }, { 'name': 'larry', 'age': 50 }] }
+     * // => { 'characters': [{ 'name': 'barney', 'age': 36 }, { 'name': 'fred', 'age': 40 }] }
      *
      * var food = {
      *   'fruits': ['apple'],
@@ -3204,7 +2999,7 @@ define("vendor/almond", function(){});
       } else if (length > 2 && typeof args[length - 1] == 'function') {
         callback = args[--length];
       }
-      var sources = nativeSlice.call(arguments, 1, length),
+      var sources = slice(arguments, 1, length),
           index = -1,
           stackA = getArray(),
           stackB = getArray();
@@ -3235,32 +3030,38 @@ define("vendor/almond", function(){});
      * @returns {Object} Returns an object without the omitted properties.
      * @example
      *
-     * _.omit({ 'name': 'moe', 'age': 40 }, 'age');
-     * // => { 'name': 'moe' }
+     * _.omit({ 'name': 'fred', 'age': 40 }, 'age');
+     * // => { 'name': 'fred' }
      *
-     * _.omit({ 'name': 'moe', 'age': 40 }, function(value) {
+     * _.omit({ 'name': 'fred', 'age': 40 }, function(value) {
      *   return typeof value == 'number';
      * });
-     * // => { 'name': 'moe' }
+     * // => { 'name': 'fred' }
      */
     function omit(object, callback, thisArg) {
-      var indexOf = getIndexOf(),
-          isFunc = typeof callback == 'function',
-          result = {};
+      var result = {};
+      if (typeof callback != 'function') {
+        var props = [];
+        forIn(object, function(value, key) {
+          props.push(key);
+        });
+        props = baseDifference(props, baseFlatten(arguments, true, false, 1));
 
-      if (isFunc) {
-        callback = lodash.createCallback(callback, thisArg, 3);
-      } else {
-        var props = baseFlatten(arguments, true, false, 1);
-      }
-      forIn(object, function(value, key, object) {
-        if (isFunc
-              ? !callback(value, key, object)
-              : indexOf(props, key) < 0
-            ) {
-          result[key] = value;
+        var index = -1,
+            length = props.length;
+
+        while (++index < length) {
+          var key = props[index];
+          result[key] = object[key];
         }
-      });
+      } else {
+        callback = lodash.createCallback(callback, thisArg, 3);
+        forIn(object, function(value, key, object) {
+          if (!callback(value, key, object)) {
+            result[key] = value;
+          }
+        });
+      }
       return result;
     }
 
@@ -3275,8 +3076,8 @@ define("vendor/almond", function(){});
      * @returns {Array} Returns new array of key-value pairs.
      * @example
      *
-     * _.pairs({ 'moe': 30, 'larry': 40 });
-     * // => [['moe', 30], ['larry', 40]] (property order is not guaranteed across environments)
+     * _.pairs({ 'barney': 36, 'fred': 40 });
+     * // => [['barney', 36], ['fred', 40]] (property order is not guaranteed across environments)
      */
     function pairs(object) {
       var index = -1,
@@ -3310,13 +3111,13 @@ define("vendor/almond", function(){});
      * @returns {Object} Returns an object composed of the picked properties.
      * @example
      *
-     * _.pick({ 'name': 'moe', '_userid': 'moe1' }, 'name');
-     * // => { 'name': 'moe' }
+     * _.pick({ 'name': 'fred', '_userid': 'fred1' }, 'name');
+     * // => { 'name': 'fred' }
      *
-     * _.pick({ 'name': 'moe', '_userid': 'moe1' }, function(value, key) {
+     * _.pick({ 'name': 'fred', '_userid': 'fred1' }, function(value, key) {
      *   return key.charAt(0) != '_';
      * });
-     * // => { 'name': 'moe' }
+     * // => { 'name': 'fred' }
      */
     function pick(object, callback, thisArg) {
       var result = {};
@@ -3344,16 +3145,16 @@ define("vendor/almond", function(){});
 
     /**
      * An alternative to `_.reduce` this method transforms `object` to a new
-     * `accumulator` object which is the result of running each of its elements
-     * through a callback, with each callback execution potentially mutating
-     * the `accumulator` object. The callback is bound to `thisArg` and invoked
-     * with four arguments; (accumulator, value, key, object). Callbacks may exit
-     * iteration early by explicitly returning `false`.
+     * `accumulator` object which is the result of running each of its own
+     * enumerable properties through a callback, with each callback execution
+     * potentially mutating the `accumulator` object. The callback is bound to
+     * `thisArg` and invoked with four arguments; (accumulator, value, key, object).
+     * Callbacks may exit iteration early by explicitly returning `false`.
      *
      * @static
      * @memberOf _
      * @category Objects
-     * @param {Array|Object} collection The collection to iterate over.
+     * @param {Array|Object} object The object to iterate over.
      * @param {Function} [callback=identity] The function called per iteration.
      * @param {*} [accumulator] The custom accumulator value.
      * @param {*} [thisArg] The `this` binding of `callback`.
@@ -3375,8 +3176,6 @@ define("vendor/almond", function(){});
      */
     function transform(object, callback, accumulator, thisArg) {
       var isArr = isArray(object);
-      callback = baseCreateCallback(callback, thisArg, 4);
-
       if (accumulator == null) {
         if (isArr) {
           accumulator = [];
@@ -3384,12 +3183,15 @@ define("vendor/almond", function(){});
           var ctor = object && object.constructor,
               proto = ctor && ctor.prototype;
 
-          accumulator = createObject(proto);
+          accumulator = baseCreate(proto);
         }
       }
-      (isArr ? baseEach : forOwn)(object, function(value, index, object) {
-        return callback(accumulator, value, index, object);
-      });
+      if (callback) {
+        callback = lodash.createCallback(callback, thisArg, 4);
+        (isArr ? forEach : forOwn)(object, function(value, index, object) {
+          return callback(accumulator, value, index, object);
+        });
+      }
       return accumulator;
     }
 
@@ -3438,8 +3240,8 @@ define("vendor/almond", function(){});
      * _.at(['a', 'b', 'c', 'd', 'e'], [0, 2, 4]);
      * // => ['a', 'c', 'e']
      *
-     * _.at(['moe', 'larry', 'curly'], 0, 2);
-     * // => ['moe', 'curly']
+     * _.at(['fred', 'barney', 'pebbles'], 0, 2);
+     * // => ['fred', 'pebbles']
      */
     function at(collection) {
       var args = arguments,
@@ -3448,9 +3250,6 @@ define("vendor/almond", function(){});
           length = (args[2] && args[2][args[1]] === collection) ? 1 : props.length,
           result = Array(length);
 
-      if (support.unindexedChars && isString(collection)) {
-        collection = collection.split('');
-      }
       while(++index < length) {
         result[index] = collection[props[index]];
       }
@@ -3478,10 +3277,10 @@ define("vendor/almond", function(){});
      * _.contains([1, 2, 3], 1, 2);
      * // => false
      *
-     * _.contains({ 'name': 'moe', 'age': 40 }, 'moe');
+     * _.contains({ 'name': 'fred', 'age': 40 }, 'fred');
      * // => true
      *
-     * _.contains('curly', 'ur');
+     * _.contains('pebbles', 'eb');
      * // => true
      */
     function contains(collection, target, fromIndex) {
@@ -3496,7 +3295,7 @@ define("vendor/almond", function(){});
       } else if (typeof length == 'number') {
         result = (isString(collection) ? collection.indexOf(target, fromIndex) : indexOf(collection, target, fromIndex)) > -1;
       } else {
-        baseEach(collection, function(value) {
+        forOwn(collection, function(value) {
           if (++index >= fromIndex) {
             return !(result = value === target);
           }
@@ -3568,37 +3367,37 @@ define("vendor/almond", function(){});
      *  else `false`.
      * @example
      *
-     * _.every([true, 1, null, 'yes'], Boolean);
+     * _.every([true, 1, null, 'yes']);
      * // => false
      *
-     * var stooges = [
-     *   { 'name': 'moe', 'age': 40 },
-     *   { 'name': 'larry', 'age': 50 }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36 },
+     *   { 'name': 'fred',   'age': 40 }
      * ];
      *
      * // using "_.pluck" callback shorthand
-     * _.every(stooges, 'age');
+     * _.every(characters, 'age');
      * // => true
      *
      * // using "_.where" callback shorthand
-     * _.every(stooges, { 'age': 50 });
+     * _.every(characters, { 'age': 36 });
      * // => false
      */
     function every(collection, callback, thisArg) {
       var result = true;
       callback = lodash.createCallback(callback, thisArg, 3);
 
-      if (isArray(collection)) {
-        var index = -1,
-            length = collection.length;
+      var index = -1,
+          length = collection ? collection.length : 0;
 
+      if (typeof length == 'number') {
         while (++index < length) {
           if (!(result = !!callback(collection[index], index, collection))) {
             break;
           }
         }
       } else {
-        baseEach(collection, function(value, index, collection) {
+        forOwn(collection, function(value, index, collection) {
           return (result = !!callback(value, index, collection));
         });
       }
@@ -3632,27 +3431,27 @@ define("vendor/almond", function(){});
      * var evens = _.filter([1, 2, 3, 4, 5, 6], function(num) { return num % 2 == 0; });
      * // => [2, 4, 6]
      *
-     * var food = [
-     *   { 'name': 'apple',  'organic': false, 'type': 'fruit' },
-     *   { 'name': 'carrot', 'organic': true,  'type': 'vegetable' }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36, 'blocked': false },
+     *   { 'name': 'fred',   'age': 40, 'blocked': true }
      * ];
      *
      * // using "_.pluck" callback shorthand
-     * _.filter(food, 'organic');
-     * // => [{ 'name': 'carrot', 'organic': true, 'type': 'vegetable' }]
+     * _.filter(characters, 'blocked');
+     * // => [{ 'name': 'fred', 'age': 40, 'blocked': true }]
      *
      * // using "_.where" callback shorthand
-     * _.filter(food, { 'type': 'fruit' });
-     * // => [{ 'name': 'apple', 'organic': false, 'type': 'fruit' }]
+     * _.filter(characters, { 'age': 36 });
+     * // => [{ 'name': 'barney', 'age': 36, 'blocked': false }]
      */
     function filter(collection, callback, thisArg) {
       var result = [];
       callback = lodash.createCallback(callback, thisArg, 3);
 
-      if (isArray(collection)) {
-        var index = -1,
-            length = collection.length;
+      var index = -1,
+          length = collection ? collection.length : 0;
 
+      if (typeof length == 'number') {
         while (++index < length) {
           var value = collection[index];
           if (callback(value, index, collection)) {
@@ -3660,7 +3459,7 @@ define("vendor/almond", function(){});
           }
         }
       } else {
-        baseEach(collection, function(value, index, collection) {
+        forOwn(collection, function(value, index, collection) {
           if (callback(value, index, collection)) {
             result.push(value);
           }
@@ -3693,32 +3492,32 @@ define("vendor/almond", function(){});
      * @returns {*} Returns the found element, else `undefined`.
      * @example
      *
-     * _.find([1, 2, 3, 4], function(num) {
-     *   return num % 2 == 0;
-     * });
-     * // => 2
-     *
-     * var food = [
-     *   { 'name': 'apple',  'organic': false, 'type': 'fruit' },
-     *   { 'name': 'banana', 'organic': true,  'type': 'fruit' },
-     *   { 'name': 'beet',   'organic': false, 'type': 'vegetable' }
+     * var characters = [
+     *   { 'name': 'barney',  'age': 36, 'blocked': false },
+     *   { 'name': 'fred',    'age': 40, 'blocked': true },
+     *   { 'name': 'pebbles', 'age': 1,  'blocked': false }
      * ];
      *
+     * _.find(characters, function(chr) {
+     *   return chr.age < 40;
+     * });
+     * // => { 'name': 'barney', 'age': 36, 'blocked': false }
+     *
      * // using "_.where" callback shorthand
-     * _.find(food, { 'type': 'vegetable' });
-     * // => { 'name': 'beet', 'organic': false, 'type': 'vegetable' }
+     * _.find(characters, { 'age': 1 });
+     * // =>  { 'name': 'pebbles', 'age': 1, 'blocked': false }
      *
      * // using "_.pluck" callback shorthand
-     * _.find(food, 'organic');
-     * // => { 'name': 'banana', 'organic': true, 'type': 'fruit' }
+     * _.find(characters, 'blocked');
+     * // => { 'name': 'fred', 'age': 40, 'blocked': true }
      */
     function find(collection, callback, thisArg) {
       callback = lodash.createCallback(callback, thisArg, 3);
 
-      if (isArray(collection)) {
-        var index = -1,
-            length = collection.length;
+      var index = -1,
+          length = collection ? collection.length : 0;
 
+      if (typeof length == 'number') {
         while (++index < length) {
           var value = collection[index];
           if (callback(value, index, collection)) {
@@ -3727,7 +3526,7 @@ define("vendor/almond", function(){});
         }
       } else {
         var result;
-        baseEach(collection, function(value, index, collection) {
+        forOwn(collection, function(value, index, collection) {
           if (callback(value, index, collection)) {
             result = value;
             return false;
@@ -3775,6 +3574,10 @@ define("vendor/almond", function(){});
      * (value, index|key, collection). Callbacks may exit iteration early by
      * explicitly returning `false`.
      *
+     * Note: As with other "Collections" methods, objects with a `length` property
+     * are iterated like arrays. To avoid this behavior `_.forIn` or `_.forOwn`
+     * may be used for object iteration.
+     *
      * @static
      * @memberOf _
      * @alias each
@@ -3792,17 +3595,18 @@ define("vendor/almond", function(){});
      * // => logs each number and returns the object (property order is not guaranteed across environments)
      */
     function forEach(collection, callback, thisArg) {
-      if (callback && typeof thisArg == 'undefined' && isArray(collection)) {
-        var index = -1,
-            length = collection.length;
+      var index = -1,
+          length = collection ? collection.length : 0;
 
+      callback = callback && typeof thisArg == 'undefined' ? callback : baseCreateCallback(callback, thisArg, 3);
+      if (typeof length == 'number') {
         while (++index < length) {
           if (callback(collection[index], index, collection) === false) {
             break;
           }
         }
       } else {
-        baseEach(collection, callback, thisArg);
+        forOwn(collection, callback);
       }
       return collection;
     }
@@ -3825,26 +3629,20 @@ define("vendor/almond", function(){});
      * // => logs each number from right to left and returns '3,2,1'
      */
     function forEachRight(collection, callback, thisArg) {
-      var iterable = collection,
-          length = collection ? collection.length : 0;
-
+      var length = collection ? collection.length : 0;
       callback = callback && typeof thisArg == 'undefined' ? callback : baseCreateCallback(callback, thisArg, 3);
-      if (isArray(collection)) {
+      if (typeof length == 'number') {
         while (length--) {
           if (callback(collection[length], length, collection) === false) {
             break;
           }
         }
       } else {
-        if (typeof length != 'number') {
-          var props = keys(collection);
-          length = props.length;
-        } else if (support.unindexedChars && isString(collection)) {
-          iterable = collection.split('');
-        }
-        baseEach(collection, function(value, key, collection) {
+        var props = keys(collection);
+        length = props.length;
+        forOwn(collection, function(value, key, collection) {
           key = props ? props[--length] : --length;
-          return callback(iterable[key], key, collection);
+          return callback(collection[key], key, collection);
         });
       }
       return collection;
@@ -3925,7 +3723,7 @@ define("vendor/almond", function(){});
      * _.indexBy(keys, function(key) { return String.fromCharCode(key.code); });
      * // => { 'a': { 'dir': 'left', 'code': 97 }, 'd': { 'dir': 'right', 'code': 100 } }
      *
-     * _.indexBy(stooges, function(key) { this.fromCharCode(key.code); }, String);
+     * _.indexBy(characters, function(key) { this.fromCharCode(key.code); }, String);
      * // => { 'a': { 'dir': 'left', 'code': 97 }, 'd': { 'dir': 'right', 'code': 100 } }
      */
     var indexBy = createAggregator(function(result, value, key) {
@@ -3955,7 +3753,7 @@ define("vendor/almond", function(){});
      * // => [['1', '2', '3'], ['4', '5', '6']]
      */
     function invoke(collection, methodName) {
-      var args = nativeSlice.call(arguments, 2),
+      var args = slice(arguments, 2),
           index = -1,
           isFunc = typeof methodName == 'function',
           length = collection ? collection.length : 0,
@@ -3997,27 +3795,28 @@ define("vendor/almond", function(){});
      * _.map({ 'one': 1, 'two': 2, 'three': 3 }, function(num) { return num * 3; });
      * // => [3, 6, 9] (property order is not guaranteed across environments)
      *
-     * var stooges = [
-     *   { 'name': 'moe', 'age': 40 },
-     *   { 'name': 'larry', 'age': 50 }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36 },
+     *   { 'name': 'fred',   'age': 40 }
      * ];
      *
      * // using "_.pluck" callback shorthand
-     * _.map(stooges, 'name');
-     * // => ['moe', 'larry']
+     * _.map(characters, 'name');
+     * // => ['barney', 'fred']
      */
     function map(collection, callback, thisArg) {
       var index = -1,
-          length = collection ? collection.length : 0,
-          result = Array(typeof length == 'number' ? length : 0);
+          length = collection ? collection.length : 0;
 
       callback = lodash.createCallback(callback, thisArg, 3);
-      if (isArray(collection)) {
+      if (typeof length == 'number') {
+        var result = Array(length);
         while (++index < length) {
           result[index] = callback(collection[index], index, collection);
         }
       } else {
-        baseEach(collection, function(value, key, collection) {
+        result = [];
+        forOwn(collection, function(value, key, collection) {
           result[++index] = callback(value, key, collection);
         });
       }
@@ -4052,23 +3851,28 @@ define("vendor/almond", function(){});
      * _.max([4, 2, 8, 6]);
      * // => 8
      *
-     * var stooges = [
-     *   { 'name': 'moe', 'age': 40 },
-     *   { 'name': 'larry', 'age': 50 }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36 },
+     *   { 'name': 'fred',   'age': 40 }
      * ];
      *
-     * _.max(stooges, function(stooge) { return stooge.age; });
-     * // => { 'name': 'larry', 'age': 50 };
+     * _.max(characters, function(chr) { return chr.age; });
+     * // => { 'name': 'fred', 'age': 40 };
      *
      * // using "_.pluck" callback shorthand
-     * _.max(stooges, 'age');
-     * // => { 'name': 'larry', 'age': 50 };
+     * _.max(characters, 'age');
+     * // => { 'name': 'fred', 'age': 40 };
      */
     function max(collection, callback, thisArg) {
       var computed = -Infinity,
           result = computed;
 
-      if (!callback && isArray(collection)) {
+      // allows working with functions like `_.map` without using
+      // their `index` argument as a callback
+      if (typeof callback != 'function' && thisArg && thisArg[callback] === collection) {
+        callback = null;
+      }
+      if (callback == null && isArray(collection)) {
         var index = -1,
             length = collection.length;
 
@@ -4079,11 +3883,11 @@ define("vendor/almond", function(){});
           }
         }
       } else {
-        callback = (!callback && isString(collection))
+        callback = (callback == null && isString(collection))
           ? charAtCallback
           : lodash.createCallback(callback, thisArg, 3);
 
-        baseEach(collection, function(value, index, collection) {
+        forEach(collection, function(value, index, collection) {
           var current = callback(value, index, collection);
           if (current > computed) {
             computed = current;
@@ -4122,23 +3926,28 @@ define("vendor/almond", function(){});
      * _.min([4, 2, 8, 6]);
      * // => 2
      *
-     * var stooges = [
-     *   { 'name': 'moe', 'age': 40 },
-     *   { 'name': 'larry', 'age': 50 }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36 },
+     *   { 'name': 'fred',   'age': 40 }
      * ];
      *
-     * _.min(stooges, function(stooge) { return stooge.age; });
-     * // => { 'name': 'moe', 'age': 40 };
+     * _.min(characters, function(chr) { return chr.age; });
+     * // => { 'name': 'barney', 'age': 36 };
      *
      * // using "_.pluck" callback shorthand
-     * _.min(stooges, 'age');
-     * // => { 'name': 'moe', 'age': 40 };
+     * _.min(characters, 'age');
+     * // => { 'name': 'barney', 'age': 36 };
      */
     function min(collection, callback, thisArg) {
       var computed = Infinity,
           result = computed;
 
-      if (!callback && isArray(collection)) {
+      // allows working with functions like `_.map` without using
+      // their `index` argument as a callback
+      if (typeof callback != 'function' && thisArg && thisArg[callback] === collection) {
+        callback = null;
+      }
+      if (callback == null && isArray(collection)) {
         var index = -1,
             length = collection.length;
 
@@ -4149,11 +3958,11 @@ define("vendor/almond", function(){});
           }
         }
       } else {
-        callback = (!callback && isString(collection))
+        callback = (callback == null && isString(collection))
           ? charAtCallback
           : lodash.createCallback(callback, thisArg, 3);
 
-        baseEach(collection, function(value, index, collection) {
+        forEach(collection, function(value, index, collection) {
           var current = callback(value, index, collection);
           if (current < computed) {
             computed = current;
@@ -4165,24 +3974,24 @@ define("vendor/almond", function(){});
     }
 
     /**
-     * Retrieves the value of a specified property from all elements in the `collection`.
+     * Retrieves the value of a specified property from all elements in the collection.
      *
      * @static
      * @memberOf _
      * @type Function
      * @category Collections
      * @param {Array|Object|string} collection The collection to iterate over.
-     * @param {string} property The property to pluck.
+     * @param {string} property The name of the property to pluck.
      * @returns {Array} Returns a new array of property values.
      * @example
      *
-     * var stooges = [
-     *   { 'name': 'moe', 'age': 40 },
-     *   { 'name': 'larry', 'age': 50 }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36 },
+     *   { 'name': 'fred',   'age': 40 }
      * ];
      *
-     * _.pluck(stooges, 'name');
-     * // => ['moe', 'larry']
+     * _.pluck(characters, 'name');
+     * // => ['barney', 'fred']
      */
     var pluck = map;
 
@@ -4217,13 +4026,14 @@ define("vendor/almond", function(){});
      * // => { 'a': 3, 'b': 6, 'c': 9 }
      */
     function reduce(collection, callback, accumulator, thisArg) {
+      if (!collection) return accumulator;
       var noaccum = arguments.length < 3;
-      callback = baseCreateCallback(callback, thisArg, 4);
+      callback = lodash.createCallback(callback, thisArg, 4);
 
-      if (isArray(collection)) {
-        var index = -1,
-            length = collection.length;
+      var index = -1,
+          length = collection.length;
 
+      if (typeof length == 'number') {
         if (noaccum) {
           accumulator = collection[++index];
         }
@@ -4231,7 +4041,7 @@ define("vendor/almond", function(){});
           accumulator = callback(accumulator, collection[index], index, collection);
         }
       } else {
-        baseEach(collection, function(value, index, collection) {
+        forOwn(collection, function(value, index, collection) {
           accumulator = noaccum
             ? (noaccum = false, value)
             : callback(accumulator, value, index, collection)
@@ -4261,7 +4071,7 @@ define("vendor/almond", function(){});
      */
     function reduceRight(collection, callback, accumulator, thisArg) {
       var noaccum = arguments.length < 3;
-      callback = baseCreateCallback(callback, thisArg, 4);
+      callback = lodash.createCallback(callback, thisArg, 4);
       forEachRight(collection, function(value, index, collection) {
         accumulator = noaccum
           ? (noaccum = false, value)
@@ -4295,18 +4105,18 @@ define("vendor/almond", function(){});
      * var odds = _.reject([1, 2, 3, 4, 5, 6], function(num) { return num % 2 == 0; });
      * // => [1, 3, 5]
      *
-     * var food = [
-     *   { 'name': 'apple',  'organic': false, 'type': 'fruit' },
-     *   { 'name': 'carrot', 'organic': true,  'type': 'vegetable' }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36, 'blocked': false },
+     *   { 'name': 'fred',   'age': 40, 'blocked': true }
      * ];
      *
      * // using "_.pluck" callback shorthand
-     * _.reject(food, 'organic');
-     * // => [{ 'name': 'apple', 'organic': false, 'type': 'fruit' }]
+     * _.reject(characters, 'blocked');
+     * // => [{ 'name': 'barney', 'age': 36, 'blocked': false }]
      *
      * // using "_.where" callback shorthand
-     * _.reject(food, { 'type': 'fruit' });
-     * // => [{ 'name': 'carrot', 'organic': true, 'type': 'vegetable' }]
+     * _.reject(characters, { 'age': 36 });
+     * // => [{ 'name': 'fred', 'age': 40, 'blocked': true }]
      */
     function reject(collection, callback, thisArg) {
       callback = lodash.createCallback(callback, thisArg, 3);
@@ -4323,8 +4133,8 @@ define("vendor/almond", function(){});
      * @category Collections
      * @param {Array|Object|string} collection The collection to sample.
      * @param {number} [n] The number of elements to sample.
-     * @param- {Object} [guard] Allows working with functions, like `_.map`,
-     *  without using their `key` and `object` arguments as sources.
+     * @param- {Object} [guard] Allows working with functions like `_.map`
+     *  without using their `index` arguments as `n`.
      * @returns {Array} Returns the random sample(s) of `collection`.
      * @example
      *
@@ -4335,14 +4145,11 @@ define("vendor/almond", function(){});
      * // => [3, 1]
      */
     function sample(collection, n, guard) {
-      var length = collection ? collection.length : 0;
-      if (typeof length != 'number') {
+      if (collection && typeof collection.length != 'number') {
         collection = values(collection);
-      } else if (support.unindexedChars && isString(collection)) {
-        collection = collection.split('');
       }
       if (n == null || guard) {
-        return collection ? collection[random(length - 1)] : undefined;
+        return collection ? collection[baseRandom(0, collection.length - 1)] : undefined;
       }
       var result = shuffle(collection);
       result.length = nativeMin(nativeMax(0, n), result.length);
@@ -4369,7 +4176,7 @@ define("vendor/almond", function(){});
           result = Array(typeof length == 'number' ? length : 0);
 
       forEach(collection, function(value) {
-        var rand = random(++index);
+        var rand = baseRandom(0, ++index);
         result[index] = result[rand];
         result[rand] = value;
       });
@@ -4393,8 +4200,8 @@ define("vendor/almond", function(){});
      * _.size({ 'one': 1, 'two': 2, 'three': 3 });
      * // => 3
      *
-     * _.size('curly');
-     * // => 5
+     * _.size('pebbles');
+     * // => 7
      */
     function size(collection) {
       var length = collection ? collection.length : 0;
@@ -4430,34 +4237,34 @@ define("vendor/almond", function(){});
      * _.some([null, 0, 'yes', false], Boolean);
      * // => true
      *
-     * var food = [
-     *   { 'name': 'apple',  'organic': false, 'type': 'fruit' },
-     *   { 'name': 'carrot', 'organic': true,  'type': 'vegetable' }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36, 'blocked': false },
+     *   { 'name': 'fred',   'age': 40, 'blocked': true }
      * ];
      *
      * // using "_.pluck" callback shorthand
-     * _.some(food, 'organic');
+     * _.some(characters, 'blocked');
      * // => true
      *
      * // using "_.where" callback shorthand
-     * _.some(food, { 'type': 'meat' });
+     * _.some(characters, { 'age': 1 });
      * // => false
      */
     function some(collection, callback, thisArg) {
       var result;
       callback = lodash.createCallback(callback, thisArg, 3);
 
-      if (isArray(collection)) {
-        var index = -1,
-            length = collection.length;
+      var index = -1,
+          length = collection ? collection.length : 0;
 
+      if (typeof length == 'number') {
         while (++index < length) {
           if ((result = callback(collection[index], index, collection))) {
             break;
           }
         }
       } else {
-        baseEach(collection, function(value, index, collection) {
+        forOwn(collection, function(value, index, collection) {
           return !(result = callback(value, index, collection));
         });
       }
@@ -4474,6 +4281,9 @@ define("vendor/almond", function(){});
      * If a property name is provided for `callback` the created "_.pluck" style
      * callback will return the property value of the given element.
      *
+     * If an array of property names is provided for `callback` the collection
+     * will be sorted by each property value.
+     *
      * If an object is provided for `callback` the created "_.where" style callback
      * will return `true` for elements that have the properties of the given object,
      * else `false`.
@@ -4482,7 +4292,7 @@ define("vendor/almond", function(){});
      * @memberOf _
      * @category Collections
      * @param {Array|Object|string} collection The collection to iterate over.
-     * @param {Function|Object|string} [callback=identity] The function called
+     * @param {Array|Function|Object|string} [callback=identity] The function called
      *  per iteration. If a property name or object is provided it will be used
      *  to create a "_.pluck" or "_.where" style callback, respectively.
      * @param {*} [thisArg] The `this` binding of `callback`.
@@ -4495,19 +4305,37 @@ define("vendor/almond", function(){});
      * _.sortBy([1, 2, 3], function(num) { return this.sin(num); }, Math);
      * // => [3, 1, 2]
      *
+     * var characters = [
+     *   { 'name': 'barney',  'age': 36 },
+     *   { 'name': 'fred',    'age': 40 },
+     *   { 'name': 'barney',  'age': 26 },
+     *   { 'name': 'fred',    'age': 30 }
+     * ];
+     *
      * // using "_.pluck" callback shorthand
-     * _.sortBy(['banana', 'strawberry', 'apple'], 'length');
-     * // => ['apple', 'banana', 'strawberry']
+     * _.map(_.sortBy(characters, 'age'), _.values);
+     * // => [['barney', 26], ['fred', 30], ['barney', 36], ['fred', 40]]
+     *
+     * // sorting by multiple properties
+     * _.map(_.sortBy(characters, ['name', 'age']), _.values);
+     * // = > [['barney', 26], ['barney', 36], ['fred', 30], ['fred', 40]]
      */
     function sortBy(collection, callback, thisArg) {
       var index = -1,
+          isArr = isArray(callback),
           length = collection ? collection.length : 0,
           result = Array(typeof length == 'number' ? length : 0);
 
-      callback = lodash.createCallback(callback, thisArg, 3);
+      if (!isArr) {
+        callback = lodash.createCallback(callback, thisArg, 3);
+      }
       forEach(collection, function(value, key, collection) {
         var object = result[++index] = getObject();
-        object.criteria = callback(value, key, collection);
+        if (isArr) {
+          object.criteria = map(callback, function(key) { return value[key]; });
+        } else {
+          (object.criteria = getArray())[0] = callback(value, key, collection);
+        }
         object.index = index;
         object.value = value;
       });
@@ -4517,6 +4345,9 @@ define("vendor/almond", function(){});
       while (length--) {
         var object = result[length];
         result[length] = object.value;
+        if (!isArr) {
+          releaseArray(object.criteria);
+        }
         releaseObject(object);
       }
       return result;
@@ -4537,9 +4368,7 @@ define("vendor/almond", function(){});
      */
     function toArray(collection) {
       if (collection && typeof collection.length == 'number') {
-        return (support.unindexedChars && isString(collection))
-          ? collection.split('')
-          : slice(collection);
+        return slice(collection);
       }
       return values(collection);
     }
@@ -4554,20 +4383,20 @@ define("vendor/almond", function(){});
      * @type Function
      * @category Collections
      * @param {Array|Object|string} collection The collection to iterate over.
-     * @param {Object} properties The object of property values to filter by.
+     * @param {Object} props The object of property values to filter by.
      * @returns {Array} Returns a new array of elements that have the given properties.
      * @example
      *
-     * var stooges = [
-     *   { 'name': 'curly', 'age': 30, 'quotes': ['Oh, a wise guy, eh?', 'Poifect!'] },
-     *   { 'name': 'moe', 'age': 40, 'quotes': ['Spread out!', 'You knucklehead!'] }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36, 'pets': ['hoppy'] },
+     *   { 'name': 'fred',   'age': 40, 'pets': ['baby puss', 'dino'] }
      * ];
      *
-     * _.where(stooges, { 'age': 40 });
-     * // => [{ 'name': 'moe', 'age': 40, 'quotes': ['Spread out!', 'You knucklehead!'] }]
+     * _.where(characters, { 'age': 36 });
+     * // => [{ 'name': 'barney', 'age': 36, 'pets': ['hoppy'] }]
      *
-     * _.where(stooges, { 'quotes': ['Poifect!'] });
-     * // => [{ 'name': 'curly', 'age': 30, 'quotes': ['Oh, a wise guy, eh?', 'Poifect!'] }]
+     * _.where(characters, { 'pets': ['dino'] });
+     * // => [{ 'name': 'fred', 'age': 40, 'pets': ['baby puss', 'dino'] }]
      */
     var where = filter;
 
@@ -4609,7 +4438,7 @@ define("vendor/almond", function(){});
      * @memberOf _
      * @category Arrays
      * @param {Array} array The array to process.
-     * @param {...Array} [array] The arrays of values to exclude.
+     * @param {...Array} [values] The arrays of values to exclude.
      * @returns {Array} Returns a new array of filtered values.
      * @example
      *
@@ -4617,38 +4446,19 @@ define("vendor/almond", function(){});
      * // => [1, 3, 4]
      */
     function difference(array) {
-      var index = -1,
-          indexOf = getIndexOf(),
-          length = array ? array.length : 0,
-          seen = baseFlatten(arguments, true, true, 1),
-          result = [];
-
-      var isLarge = length >= largeArraySize && indexOf === baseIndexOf;
-
-      if (isLarge) {
-        var cache = createCache(seen);
-        if (cache) {
-          indexOf = cacheIndexOf;
-          seen = cache;
-        } else {
-          isLarge = false;
-        }
-      }
-      while (++index < length) {
-        var value = array[index];
-        if (indexOf(seen, value) < 0) {
-          result.push(value);
-        }
-      }
-      if (isLarge) {
-        releaseObject(seen);
-      }
-      return result;
+      return baseDifference(array, baseFlatten(arguments, true, true, 1));
     }
 
     /**
      * This method is like `_.find` except that it returns the index of the first
      * element that passes the callback check, instead of the element itself.
+     *
+     * If a property name is provided for `callback` the created "_.pluck" style
+     * callback will return the property value of the given element.
+     *
+     * If an object is provided for `callback` the created "_.where" style callback
+     * will return `true` for elements that have the properties of the given object,
+     * else `false`.
      *
      * @static
      * @memberOf _
@@ -4661,9 +4471,23 @@ define("vendor/almond", function(){});
      * @returns {number} Returns the index of the found element, else `-1`.
      * @example
      *
-     * _.findIndex(['apple', 'banana', 'beet'], function(food) {
-     *   return /^b/.test(food);
+     * var characters = [
+     *   { 'name': 'barney',  'age': 36, 'blocked': false },
+     *   { 'name': 'fred',    'age': 40, 'blocked': true },
+     *   { 'name': 'pebbles', 'age': 1,  'blocked': false }
+     * ];
+     *
+     * _.findIndex(characters, function(chr) {
+     *   return chr.age < 20;
      * });
+     * // => 2
+     *
+     * // using "_.where" callback shorthand
+     * _.findIndex(characters, { 'age': 36 });
+     * // => 0
+     *
+     * // using "_.pluck" callback shorthand
+     * _.findIndex(characters, 'blocked');
      * // => 1
      */
     function findIndex(array, callback, thisArg) {
@@ -4683,6 +4507,13 @@ define("vendor/almond", function(){});
      * This method is like `_.findIndex` except that it iterates over elements
      * of a `collection` from right to left.
      *
+     * If a property name is provided for `callback` the created "_.pluck" style
+     * callback will return the property value of the given element.
+     *
+     * If an object is provided for `callback` the created "_.where" style callback
+     * will return `true` for elements that have the properties of the given object,
+     * else `false`.
+     *
      * @static
      * @memberOf _
      * @category Arrays
@@ -4694,9 +4525,23 @@ define("vendor/almond", function(){});
      * @returns {number} Returns the index of the found element, else `-1`.
      * @example
      *
-     * _.findLastIndex(['apple', 'banana', 'beet'], function(food) {
-     *   return /^b/.test(food);
+     * var characters = [
+     *   { 'name': 'barney',  'age': 36, 'blocked': true },
+     *   { 'name': 'fred',    'age': 40, 'blocked': false },
+     *   { 'name': 'pebbles', 'age': 1,  'blocked': true }
+     * ];
+     *
+     * _.findLastIndex(characters, function(chr) {
+     *   return chr.age > 30;
      * });
+     * // => 1
+     *
+     * // using "_.where" callback shorthand
+     * _.findLastIndex(characters, { 'age': 36 });
+     * // => 0
+     *
+     * // using "_.pluck" callback shorthand
+     * _.findLastIndex(characters, 'blocked');
      * // => 2
      */
     function findLastIndex(array, callback, thisArg) {
@@ -4747,24 +4592,19 @@ define("vendor/almond", function(){});
      * });
      * // => [1, 2]
      *
-     * var food = [
-     *   { 'name': 'banana', 'organic': true },
-     *   { 'name': 'beet',   'organic': false },
+     * var characters = [
+     *   { 'name': 'barney',  'blocked': true,  'employer': 'slate' },
+     *   { 'name': 'fred',    'blocked': false, 'employer': 'slate' },
+     *   { 'name': 'pebbles', 'blocked': true,  'employer': 'na' }
      * ];
      *
      * // using "_.pluck" callback shorthand
-     * _.first(food, 'organic');
-     * // => [{ 'name': 'banana', 'organic': true }]
-     *
-     * var food = [
-     *   { 'name': 'apple',  'type': 'fruit' },
-     *   { 'name': 'banana', 'type': 'fruit' },
-     *   { 'name': 'beet',   'type': 'vegetable' }
-     * ];
+     * _.first(characters, 'blocked');
+     * // => [{ 'name': 'barney', 'blocked': true, 'employer': 'slate' }]
      *
      * // using "_.where" callback shorthand
-     * _.first(food, { 'type': 'fruit' });
-     * // => [{ 'name': 'apple', 'type': 'fruit' }, { 'name': 'banana', 'type': 'fruit' }]
+     * _.pluck(_.first(characters, { 'employer': 'slate' }), 'name');
+     * // => ['barney', 'fred']
      */
     function first(array, callback, thisArg) {
       var n = 0,
@@ -4817,20 +4657,20 @@ define("vendor/almond", function(){});
      * _.flatten([1, [2], [3, [[4]]]], true);
      * // => [1, 2, 3, [[4]]];
      *
-     * var stooges = [
-     *   { 'name': 'curly', 'quotes': ['Oh, a wise guy, eh?', 'Poifect!'] },
-     *   { 'name': 'moe', 'quotes': ['Spread out!', 'You knucklehead!'] }
+     * var characters = [
+     *   { 'name': 'barney', 'age': 30, 'pets': ['hoppy'] },
+     *   { 'name': 'fred',   'age': 40, 'pets': ['baby puss', 'dino'] }
      * ];
      *
      * // using "_.pluck" callback shorthand
-     * _.flatten(stooges, 'quotes');
-     * // => ['Oh, a wise guy, eh?', 'Poifect!', 'Spread out!', 'You knucklehead!']
+     * _.flatten(characters, 'pets');
+     * // => ['hoppy', 'baby puss', 'dino']
      */
     function flatten(array, isShallow, callback, thisArg) {
       // juggle arguments
       if (typeof isShallow != 'boolean' && isShallow != null) {
         thisArg = callback;
-        callback = !(thisArg && thisArg[isShallow] === array) ? isShallow : null;
+        callback = (typeof isShallow != 'function' && thisArg && thisArg[isShallow] === array) ? null : isShallow;
         isShallow = false;
       }
       if (callback != null) {
@@ -4910,24 +4750,19 @@ define("vendor/almond", function(){});
      * });
      * // => [1]
      *
-     * var food = [
-     *   { 'name': 'beet',   'organic': false },
-     *   { 'name': 'carrot', 'organic': true }
+     * var characters = [
+     *   { 'name': 'barney',  'blocked': false, 'employer': 'slate' },
+     *   { 'name': 'fred',    'blocked': true,  'employer': 'slate' },
+     *   { 'name': 'pebbles', 'blocked': true,  'employer': 'na' }
      * ];
      *
      * // using "_.pluck" callback shorthand
-     * _.initial(food, 'organic');
-     * // => [{ 'name': 'beet',   'organic': false }]
-     *
-     * var food = [
-     *   { 'name': 'banana', 'type': 'fruit' },
-     *   { 'name': 'beet',   'type': 'vegetable' },
-     *   { 'name': 'carrot', 'type': 'vegetable' }
-     * ];
+     * _.initial(characters, 'blocked');
+     * // => [{ 'name': 'barney',  'blocked': false, 'employer': 'slate' }]
      *
      * // using "_.where" callback shorthand
-     * _.initial(food, { 'type': 'vegetable' });
-     * // => [{ 'name': 'banana', 'type': 'fruit' }]
+     * _.pluck(_.initial(characters, { 'employer': 'na' }), 'name');
+     * // => ['barney', 'fred']
      */
     function initial(array, callback, thisArg) {
       var n = 0,
@@ -4953,29 +4788,34 @@ define("vendor/almond", function(){});
      * @memberOf _
      * @category Arrays
      * @param {...Array} [array] The arrays to inspect.
-     * @returns {Array} Returns an array of composite values.
+     * @returns {Array} Returns an array of shared values.
      * @example
      *
-     * _.intersection([1, 2, 3], [101, 2, 1, 10], [2, 1]);
+     * _.intersection([1, 2, 3], [5, 2, 1, 4], [2, 1]);
      * // => [1, 2]
      */
-    function intersection(array) {
-      var args = arguments,
-          argsLength = args.length,
+    function intersection() {
+      var args = [],
           argsIndex = -1,
+          argsLength = arguments.length,
           caches = getArray(),
-          index = -1,
           indexOf = getIndexOf(),
-          length = array ? array.length : 0,
-          result = [],
+          trustIndexOf = indexOf === baseIndexOf,
           seen = getArray();
 
       while (++argsIndex < argsLength) {
-        var value = args[argsIndex];
-        caches[argsIndex] = indexOf === baseIndexOf &&
-          (value ? value.length : 0) >= largeArraySize &&
-          createCache(argsIndex ? args[argsIndex] : seen);
+        var value = arguments[argsIndex];
+        if (isArray(value) || isArguments(value)) {
+          args.push(value);
+          caches.push(trustIndexOf && value.length >= largeArraySize &&
+            createCache(argsIndex ? args[argsIndex] : seen));
+        }
       }
+      var array = args[0],
+          index = -1,
+          length = array ? array.length : 0,
+          result = [];
+
       outer:
       while (++index < length) {
         var cache = caches[0];
@@ -5040,24 +4880,19 @@ define("vendor/almond", function(){});
      * });
      * // => [2, 3]
      *
-     * var food = [
-     *   { 'name': 'beet',   'organic': false },
-     *   { 'name': 'carrot', 'organic': true }
+     * var characters = [
+     *   { 'name': 'barney',  'blocked': false, 'employer': 'slate' },
+     *   { 'name': 'fred',    'blocked': true,  'employer': 'slate' },
+     *   { 'name': 'pebbles', 'blocked': true,  'employer': 'na' }
      * ];
      *
      * // using "_.pluck" callback shorthand
-     * _.last(food, 'organic');
-     * // => [{ 'name': 'carrot', 'organic': true }]
-     *
-     * var food = [
-     *   { 'name': 'banana', 'type': 'fruit' },
-     *   { 'name': 'beet',   'type': 'vegetable' },
-     *   { 'name': 'carrot', 'type': 'vegetable' }
-     * ];
+     * _.pluck(_.last(characters, 'blocked'), 'name');
+     * // => ['fred', 'pebbles']
      *
      * // using "_.where" callback shorthand
-     * _.last(food, { 'type': 'vegetable' });
-     * // => [{ 'name': 'beet', 'type': 'vegetable' }, { 'name': 'carrot', 'type': 'vegetable' }]
+     * _.last(characters, { 'employer': 'na' });
+     * // => [{ 'name': 'pebbles', 'blocked': true, 'employer': 'na' }]
      */
     function last(array, callback, thisArg) {
       var n = 0,
@@ -5082,6 +4917,13 @@ define("vendor/almond", function(){});
      * Gets the index at which the last occurrence of `value` is found using strict
      * equality for comparisons, i.e. `===`. If `fromIndex` is negative, it is used
      * as the offset from the end of the collection.
+     *
+     * If a property name is provided for `callback` the created "_.pluck" style
+     * callback will return the property value of the given element.
+     *
+     * If an object is provided for `callback` the created "_.where" style callback
+     * will return `true` for elements that have the properties of the given object,
+     * else `false`.
      *
      * @static
      * @memberOf _
@@ -5161,17 +5003,17 @@ define("vendor/almond", function(){});
      * @returns {Array} Returns a new range array.
      * @example
      *
-     * _.range(10);
-     * // => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+     * _.range(4);
+     * // => [0, 1, 2, 3]
      *
-     * _.range(1, 11);
-     * // => [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+     * _.range(1, 5);
+     * // => [1, 2, 3, 4]
      *
-     * _.range(0, 30, 5);
-     * // => [0, 5, 10, 15, 20, 25]
+     * _.range(0, 20, 5);
+     * // => [0, 5, 10, 15]
      *
-     * _.range(0, -10, -1);
-     * // => [0, -1, -2, -3, -4, -5, -6, -7, -8, -9]
+     * _.range(0, -4, -1);
+     * // => [0, -1, -2, -3]
      *
      * _.range(1, 4, 0);
      * // => [1, 1, 1]
@@ -5187,7 +5029,7 @@ define("vendor/almond", function(){});
         end = start;
         start = 0;
       }
-      // use `Array(length)` so engines, like Chakra and V8, avoid slower modes
+      // use `Array(length)` so engines like Chakra and V8 avoid slower modes
       // http://youtu.be/XAqIpGU8ZZk#t=17m25s
       var index = -1,
           length = nativeMax(0, ceil((end - start) / (step || 1))),
@@ -5287,24 +5129,19 @@ define("vendor/almond", function(){});
      * });
      * // => [3]
      *
-     * var food = [
-     *   { 'name': 'banana', 'organic': true },
-     *   { 'name': 'beet',   'organic': false },
+     * var characters = [
+     *   { 'name': 'barney',  'blocked': true,  'employer': 'slate' },
+     *   { 'name': 'fred',    'blocked': false,  'employer': 'slate' },
+     *   { 'name': 'pebbles', 'blocked': true, 'employer': 'na' }
      * ];
      *
      * // using "_.pluck" callback shorthand
-     * _.rest(food, 'organic');
-     * // => [{ 'name': 'beet', 'organic': false }]
-     *
-     * var food = [
-     *   { 'name': 'apple',  'type': 'fruit' },
-     *   { 'name': 'banana', 'type': 'fruit' },
-     *   { 'name': 'beet',   'type': 'vegetable' }
-     * ];
+     * _.pluck(_.rest(characters, 'blocked'), 'name');
+     * // => ['fred', 'pebbles']
      *
      * // using "_.where" callback shorthand
-     * _.rest(food, { 'type': 'fruit' });
-     * // => [{ 'name': 'beet', 'type': 'vegetable' }]
+     * _.rest(characters, { 'employer': 'slate' });
+     * // => [{ 'name': 'pebbles', 'blocked': true, 'employer': 'na' }]
      */
     function rest(array, callback, thisArg) {
       if (typeof callback != 'number' && callback != null) {
@@ -5395,13 +5232,13 @@ define("vendor/almond", function(){});
      * @memberOf _
      * @category Arrays
      * @param {...Array} [array] The arrays to inspect.
-     * @returns {Array} Returns an array of composite values.
+     * @returns {Array} Returns an array of combined values.
      * @example
      *
-     * _.union([1, 2, 3], [101, 2, 1, 10], [2, 1]);
-     * // => [1, 2, 3, 101, 10]
+     * _.union([1, 2, 3], [5, 2, 1, 4], [2, 1]);
+     * // => [1, 2, 3, 5, 4]
      */
-    function union(array) {
+    function union() {
       return baseUniq(baseFlatten(arguments, true, true));
     }
 
@@ -5453,7 +5290,7 @@ define("vendor/almond", function(){});
       // juggle arguments
       if (typeof isSorted != 'boolean' && isSorted != null) {
         thisArg = callback;
-        callback = !(thisArg && thisArg[isSorted] === array) ? isSorted : null;
+        callback = (typeof isSorted != 'function' && thisArg && thisArg[isSorted] === array) ? null : isSorted;
         isSorted = false;
       }
       if (callback != null) {
@@ -5478,7 +5315,39 @@ define("vendor/almond", function(){});
      * // => [2, 3, 4]
      */
     function without(array) {
-      return difference(array, nativeSlice.call(arguments, 1));
+      return baseDifference(array, slice(arguments, 1));
+    }
+
+    /**
+     * Creates an array that is the symmetric difference of the provided arrays.
+     * See http://en.wikipedia.org/wiki/Symmetric_difference.
+     *
+     * @static
+     * @memberOf _
+     * @category Arrays
+     * @param {...Array} [array] The arrays to inspect.
+     * @returns {Array} Returns an array of values.
+     * @example
+     *
+     * _.xor([1, 2, 3], [5, 2, 1, 4]);
+     * // => [3, 5, 4]
+     *
+     * _.xor([1, 2, 5], [2, 3, 5], [3, 4, 5]);
+     * // => [1, 4, 5]
+     */
+    function xor() {
+      var index = -1,
+          length = arguments.length;
+
+      while (++index < length) {
+        var array = arguments[index];
+        if (isArray(array) || isArguments(array)) {
+          var result = result
+            ? baseUniq(baseDifference(result, array).concat(baseDifference(array, result)))
+            : array;
+        }
+      }
+      return result || [];
     }
 
     /**
@@ -5494,8 +5363,8 @@ define("vendor/almond", function(){});
      * @returns {Array} Returns a new array of grouped elements.
      * @example
      *
-     * _.zip(['moe', 'larry'], [30, 40], [true, false]);
-     * // => [['moe', 30, true], ['larry', 40, false]]
+     * _.zip(['fred', 'barney'], [30, 40], [true, false]);
+     * // => [['fred', 30, true], ['barney', 40, false]]
      */
     function zip() {
       var array = arguments.length > 1 ? arguments : arguments[0],
@@ -5524,14 +5393,17 @@ define("vendor/almond", function(){});
      *  corresponding values.
      * @example
      *
-     * _.zipObject(['moe', 'larry'], [30, 40]);
-     * // => { 'moe': 30, 'larry': 40 }
+     * _.zipObject(['fred', 'barney'], [30, 40]);
+     * // => { 'fred': 30, 'barney': 40 }
      */
     function zipObject(keys, values) {
       var index = -1,
           length = keys ? keys.length : 0,
           result = {};
 
+      if (!values && length && !isArray(keys[0])) {
+        values = [];
+      }
       while (++index < length) {
         var key = keys[index];
         if (values) {
@@ -5598,14 +5470,14 @@ define("vendor/almond", function(){});
      *   return greeting + ' ' + this.name;
      * };
      *
-     * func = _.bind(func, { 'name': 'moe' }, 'hi');
+     * func = _.bind(func, { 'name': 'fred' }, 'hi');
      * func();
-     * // => 'hi moe'
+     * // => 'hi fred'
      */
     function bind(func, thisArg) {
       return arguments.length > 2
-        ? createBound(func, 17, nativeSlice.call(arguments, 2), null, thisArg)
-        : createBound(func, 1, null, null, thisArg);
+        ? createWrapper(func, 17, slice(arguments, 2), null, thisArg)
+        : createWrapper(func, 1, null, null, thisArg);
     }
 
     /**
@@ -5624,8 +5496,8 @@ define("vendor/almond", function(){});
      * @example
      *
      * var view = {
-     *  'label': 'docs',
-     *  'onClick': function() { console.log('clicked ' + this.label); }
+     *   'label': 'docs',
+     *   'onClick': function() { console.log('clicked ' + this.label); }
      * };
      *
      * _.bindAll(view);
@@ -5639,7 +5511,7 @@ define("vendor/almond", function(){});
 
       while (++index < length) {
         var key = funcs[index];
-        object[key] = createBound(object[key], 1, null, null, object);
+        object[key] = createWrapper(object[key], 1, null, null, object);
       }
       return object;
     }
@@ -5661,7 +5533,7 @@ define("vendor/almond", function(){});
      * @example
      *
      * var object = {
-     *   'name': 'moe',
+     *   'name': 'fred',
      *   'greet': function(greeting) {
      *     return greeting + ' ' + this.name;
      *   }
@@ -5669,19 +5541,19 @@ define("vendor/almond", function(){});
      *
      * var func = _.bindKey(object, 'greet', 'hi');
      * func();
-     * // => 'hi moe'
+     * // => 'hi fred'
      *
      * object.greet = function(greeting) {
-     *   return greeting + ', ' + this.name + '!';
+     *   return greeting + 'ya ' + this.name + '!';
      * };
      *
      * func();
-     * // => 'hi, moe!'
+     * // => 'hiya fred!'
      */
     function bindKey(object, key) {
       return arguments.length > 2
-        ? createBound(key, 19, nativeSlice.call(arguments, 2), null, object)
-        : createBound(key, 3, null, null, object);
+        ? createWrapper(key, 19, slice(arguments, 2), null, object)
+        : createWrapper(key, 3, null, null, object);
     }
 
     /**
@@ -5698,7 +5570,7 @@ define("vendor/almond", function(){});
      * @example
      *
      * var realNameMap = {
-     *   'curly': 'jerome'
+     *   'pebbles': 'penelope'
      * };
      *
      * var format = function(name) {
@@ -5711,8 +5583,8 @@ define("vendor/almond", function(){});
      * };
      *
      * var welcome = _.compose(greet, format);
-     * welcome('curly');
-     * // => 'Hiya Jerome!'
+     * welcome('pebbles');
+     * // => 'Hiya Penelope!'
      */
     function compose() {
       var funcs = arguments,
@@ -5731,74 +5603,6 @@ define("vendor/almond", function(){});
           args = [funcs[length].apply(this, args)];
         }
         return args[0];
-      };
-    }
-
-    /**
-     * Produces a callback bound to an optional `thisArg`. If `func` is a property
-     * name the created callback will return the property value for a given element.
-     * If `func` is an object the created callback will return `true` for elements
-     * that contain the equivalent object properties, otherwise it will return `false`.
-     *
-     * @static
-     * @memberOf _
-     * @category Functions
-     * @param {*} [func=identity] The value to convert to a callback.
-     * @param {*} [thisArg] The `this` binding of the created callback.
-     * @param {number} [argCount] The number of arguments the callback accepts.
-     * @returns {Function} Returns a callback function.
-     * @example
-     *
-     * var stooges = [
-     *   { 'name': 'moe', 'age': 40 },
-     *   { 'name': 'larry', 'age': 50 }
-     * ];
-     *
-     * // wrap to create custom callback shorthands
-     * _.createCallback = _.wrap(_.createCallback, function(func, callback, thisArg) {
-     *   var match = /^(.+?)__([gl]t)(.+)$/.exec(callback);
-     *   return !match ? func(callback, thisArg) : function(object) {
-     *     return match[2] == 'gt' ? object[match[1]] > match[3] : object[match[1]] < match[3];
-     *   };
-     * });
-     *
-     * _.filter(stooges, 'age__gt45');
-     * // => [{ 'name': 'larry', 'age': 50 }]
-     */
-    function createCallback(func, thisArg, argCount) {
-      var type = typeof func;
-      if (func == null || type == 'function') {
-        return baseCreateCallback(func, thisArg, argCount);
-      }
-      // handle "_.pluck" style callback shorthands
-      if (type != 'object') {
-        return function(object) {
-          return object[func];
-        };
-      }
-      var props = keys(func),
-          key = props[0],
-          a = func[key];
-
-      // handle "_.where" style callback shorthands
-      if (props.length == 1 && a === a && !isObject(a)) {
-        // fast path the common case of providing an object with a single
-        // property containing a primitive value
-        return function(object) {
-          var b = object[key];
-          return a === b && (a !== 0 || (1 / a == 1 / b));
-        };
-      }
-      return function(object) {
-        var length = props.length,
-            result = false;
-
-        while (length--) {
-          if (!(result = baseIsEqual(object[props[length]], func[props[length]], null, true))) {
-            break;
-          }
-        }
-        return result;
       };
     }
 
@@ -5832,7 +5636,7 @@ define("vendor/almond", function(){});
      */
     function curry(func, arity) {
       arity = typeof arity == 'number' ? arity : (+arity || func.length);
-      return createBound(func, 4, null, null, null, arity);
+      return createWrapper(func, 4, null, null, null, arity);
     }
 
     /**
@@ -5899,7 +5703,7 @@ define("vendor/almond", function(){});
         trailing = 'trailing' in options ? options.trailing : trailing;
       }
       var delayed = function() {
-        var remaining = wait - (new Date - stamp);
+        var remaining = wait - (now() - stamp);
         if (remaining <= 0) {
           if (maxTimeoutId) {
             clearTimeout(maxTimeoutId);
@@ -5907,8 +5711,11 @@ define("vendor/almond", function(){});
           var isCalled = trailingCall;
           maxTimeoutId = timeoutId = trailingCall = undefined;
           if (isCalled) {
-            lastCalled = +new Date;
+            lastCalled = now();
             result = func.apply(thisArg, args);
+            if (!timeoutId && !maxTimeoutId) {
+              args = thisArg = null;
+            }
           }
         } else {
           timeoutId = setTimeout(delayed, remaining);
@@ -5921,14 +5728,17 @@ define("vendor/almond", function(){});
         }
         maxTimeoutId = timeoutId = trailingCall = undefined;
         if (trailing || (maxWait !== wait)) {
-          lastCalled = +new Date;
+          lastCalled = now();
           result = func.apply(thisArg, args);
+          if (!timeoutId && !maxTimeoutId) {
+            args = thisArg = null;
+          }
         }
       };
 
       return function() {
         args = arguments;
-        stamp = +new Date;
+        stamp = now();
         thisArg = this;
         trailingCall = trailing && (timeoutId || !leading);
 
@@ -5938,8 +5748,10 @@ define("vendor/almond", function(){});
           if (!maxTimeoutId && !leading) {
             lastCalled = stamp;
           }
-          var remaining = maxWait - (stamp - lastCalled);
-          if (remaining <= 0) {
+          var remaining = maxWait - (stamp - lastCalled),
+              isCalled = remaining <= 0;
+
+          if (isCalled) {
             if (maxTimeoutId) {
               maxTimeoutId = clearTimeout(maxTimeoutId);
             }
@@ -5950,11 +5762,18 @@ define("vendor/almond", function(){});
             maxTimeoutId = setTimeout(maxDelayed, remaining);
           }
         }
-        if (!timeoutId && wait !== maxWait) {
+        if (isCalled && timeoutId) {
+          timeoutId = clearTimeout(timeoutId);
+        }
+        else if (!timeoutId && wait !== maxWait) {
           timeoutId = setTimeout(delayed, wait);
         }
         if (leadingCall) {
+          isCalled = true;
           result = func.apply(thisArg, args);
+        }
+        if (isCalled && !timeoutId && !maxTimeoutId) {
+          args = thisArg = null;
         }
         return result;
       };
@@ -5972,24 +5791,15 @@ define("vendor/almond", function(){});
      * @returns {number} Returns the timer id.
      * @example
      *
-     * _.defer(function() { console.log('deferred'); });
-     * // returns from the function before 'deferred' is logged
+     * _.defer(function(text) { console.log(text); }, 'deferred');
+     * // logs 'deferred' after one or more milliseconds
      */
     function defer(func) {
       if (!isFunction(func)) {
         throw new TypeError;
       }
-      var args = nativeSlice.call(arguments, 1);
+      var args = slice(arguments, 1);
       return setTimeout(function() { func.apply(undefined, args); }, 1);
-    }
-    // use `setImmediate` if available in Node.js
-    if (isV8 && moduleExports && typeof setImmediate == 'function') {
-      defer = function(func) {
-        if (!isFunction(func)) {
-          throw new TypeError;
-        }
-        return setImmediate.apply(context, arguments);
-      };
     }
 
     /**
@@ -6005,15 +5815,14 @@ define("vendor/almond", function(){});
      * @returns {number} Returns the timer id.
      * @example
      *
-     * var log = _.bind(console.log, console);
-     * _.delay(log, 1000, 'logged later');
-     * // => 'logged later' (Appears after one second.)
+     * _.delay(function(text) { console.log(text); }, 1000, 'later');
+     * // => logs 'later' after one second
      */
     function delay(func, wait) {
       if (!isFunction(func)) {
         throw new TypeError;
       }
-      var args = nativeSlice.call(arguments, 2);
+      var args = slice(arguments, 2);
       return setTimeout(function() { func.apply(undefined, args); }, wait);
     }
 
@@ -6037,19 +5846,22 @@ define("vendor/almond", function(){});
      *   return n < 2 ? n : fibonacci(n - 1) + fibonacci(n - 2);
      * });
      *
+     * fibonacci(9)
+     * // => 34
+     *
      * var data = {
-     *   'moe': { 'name': 'moe', 'age': 40 },
-     *   'curly': { 'name': 'curly', 'age': 60 }
+     *   'fred': { 'name': 'fred', 'age': 40 },
+     *   'pebbles': { 'name': 'pebbles', 'age': 1 }
      * };
      *
      * // modifying the result cache
-     * var stooge = _.memoize(function(name) { return data[name]; }, _.identity);
-     * stooge('curly');
-     * // => { 'name': 'curly', 'age': 60 }
+     * var get = _.memoize(function(name) { return data[name]; }, _.identity);
+     * get('pebbles');
+     * // => { 'name': 'pebbles', 'age': 1 }
      *
-     * stooge.cache.curly.name = 'jerome';
-     * stooge('curly');
-     * // => { 'name': 'jerome', 'age': 60 }
+     * get.cache.pebbles.name = 'penelope';
+     * get('pebbles');
+     * // => { 'name': 'penelope', 'age': 1 }
      */
     function memoize(func, resolver) {
       if (!isFunction(func)) {
@@ -6119,11 +5931,11 @@ define("vendor/almond", function(){});
      *
      * var greet = function(greeting, name) { return greeting + ' ' + name; };
      * var hi = _.partial(greet, 'hi');
-     * hi('moe');
-     * // => 'hi moe'
+     * hi('fred');
+     * // => 'hi fred'
      */
     function partial(func) {
-      return createBound(func, 16, nativeSlice.call(arguments, 1));
+      return createWrapper(func, 16, slice(arguments, 1));
     }
 
     /**
@@ -6154,7 +5966,7 @@ define("vendor/almond", function(){});
      * // => { '_': _, 'jq': $ }
      */
     function partialRight(func) {
-      return createBound(func, 32, null, nativeSlice.call(arguments, 1));
+      return createWrapper(func, 32, null, slice(arguments, 1));
     }
 
     /**
@@ -6201,14 +6013,11 @@ define("vendor/almond", function(){});
         leading = 'leading' in options ? options.leading : leading;
         trailing = 'trailing' in options ? options.trailing : trailing;
       }
-      options = getObject();
-      options.leading = leading;
-      options.maxWait = wait;
-      options.trailing = trailing;
+      debounceOptions.leading = leading;
+      debounceOptions.maxWait = wait;
+      debounceOptions.trailing = trailing;
 
-      var result = debounce(func, wait, options);
-      releaseObject(options);
-      return result;
+      return debounce(func, wait, debounceOptions);
     }
 
     /**
@@ -6225,25 +6034,105 @@ define("vendor/almond", function(){});
      * @returns {Function} Returns the new function.
      * @example
      *
-     * var hello = function(name) { return 'hello ' + name; };
-     * hello = _.wrap(hello, function(func) {
-     *   return 'before, ' + func('moe') + ', after';
+     * var p = _.wrap(_.escape, function(func, text) {
+     *   return '<p>' + func(text) + '</p>';
      * });
-     * hello();
-     * // => 'before, hello moe, after'
+     *
+     * p('Fred, Wilma, & Pebbles');
+     * // => '<p>Fred, Wilma, &amp; Pebbles</p>'
      */
     function wrap(value, wrapper) {
-      if (!isFunction(wrapper)) {
-        throw new TypeError;
-      }
-      return function() {
-        var args = [value];
-        push.apply(args, arguments);
-        return wrapper.apply(this, args);
-      };
+      return createWrapper(wrapper, 16, [value]);
     }
 
     /*--------------------------------------------------------------------------*/
+
+    /**
+     * Creates a function that returns `value`.
+     *
+     * @static
+     * @memberOf _
+     * @category Utilities
+     * @param {*} value The value to return from the new function.
+     * @returns {Function} Returns the new function.
+     * @example
+     *
+     * var object = { 'name': 'fred' };
+     * var getter = _.constant(object);
+     * getter() === object;
+     * // => true
+     */
+    function constant(value) {
+      return function() {
+        return value;
+      };
+    }
+
+    /**
+     * Produces a callback bound to an optional `thisArg`. If `func` is a property
+     * name the created callback will return the property value for a given element.
+     * If `func` is an object the created callback will return `true` for elements
+     * that contain the equivalent object properties, otherwise it will return `false`.
+     *
+     * @static
+     * @memberOf _
+     * @category Utilities
+     * @param {*} [func=identity] The value to convert to a callback.
+     * @param {*} [thisArg] The `this` binding of the created callback.
+     * @param {number} [argCount] The number of arguments the callback accepts.
+     * @returns {Function} Returns a callback function.
+     * @example
+     *
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36 },
+     *   { 'name': 'fred',   'age': 40 }
+     * ];
+     *
+     * // wrap to create custom callback shorthands
+     * _.createCallback = _.wrap(_.createCallback, function(func, callback, thisArg) {
+     *   var match = /^(.+?)__([gl]t)(.+)$/.exec(callback);
+     *   return !match ? func(callback, thisArg) : function(object) {
+     *     return match[2] == 'gt' ? object[match[1]] > match[3] : object[match[1]] < match[3];
+     *   };
+     * });
+     *
+     * _.filter(characters, 'age__gt38');
+     * // => [{ 'name': 'fred', 'age': 40 }]
+     */
+    function createCallback(func, thisArg, argCount) {
+      var type = typeof func;
+      if (func == null || type == 'function') {
+        return baseCreateCallback(func, thisArg, argCount);
+      }
+      // handle "_.pluck" style callback shorthands
+      if (type != 'object') {
+        return property(func);
+      }
+      var props = keys(func),
+          key = props[0],
+          a = func[key];
+
+      // handle "_.where" style callback shorthands
+      if (props.length == 1 && a === a && !isObject(a)) {
+        // fast path the common case of providing an object with a single
+        // property containing a primitive value
+        return function(object) {
+          var b = object[key];
+          return a === b && (a !== 0 || (1 / a == 1 / b));
+        };
+      }
+      return function(object) {
+        var length = props.length,
+            result = false;
+
+        while (length--) {
+          if (!(result = baseIsEqual(object[props[length]], func[props[length]], null, true))) {
+            break;
+          }
+        }
+        return result;
+      };
+    }
 
     /**
      * Converts the characters `&`, `<`, `>`, `"`, and `'` in `string` to their
@@ -6256,8 +6145,8 @@ define("vendor/almond", function(){});
      * @returns {string} Returns the escaped string.
      * @example
      *
-     * _.escape('Moe, Larry & Curly');
-     * // => 'Moe, Larry &amp; Curly'
+     * _.escape('Fred, Wilma, & Pebbles');
+     * // => 'Fred, Wilma, &amp; Pebbles'
      */
     function escape(string) {
       return string == null ? '' : String(string).replace(reUnescapedHtml, escapeHtmlChar);
@@ -6273,8 +6162,8 @@ define("vendor/almond", function(){});
      * @returns {*} Returns `value`.
      * @example
      *
-     * var moe = { 'name': 'moe' };
-     * moe === _.identity(moe);
+     * var object = { 'name': 'fred' };
+     * _.identity(object) === object;
      * // => true
      */
     function identity(value) {
@@ -6282,49 +6171,72 @@ define("vendor/almond", function(){});
     }
 
     /**
-     * Adds function properties of a source object to the `lodash` function and
-     * chainable wrapper.
+     * Adds function properties of a source object to the destination object.
+     * If `object` is a function methods will be added to its prototype as well.
      *
      * @static
      * @memberOf _
      * @category Utilities
-     * @param {Object} object The object of function properties to add to `lodash`.
-     * @param {Object} object The object of function properties to add to `lodash`.
+     * @param {Function|Object} [object=lodash] object The destination object.
+     * @param {Object} source The object of functions to add.
+     * @param {Object} [options] The options object.
+     * @param {boolean} [options.chain=true] Specify whether the functions added are chainable.
      * @example
      *
-     * _.mixin({
-     *   'capitalize': function(string) {
-     *     return string.charAt(0).toUpperCase() + string.slice(1).toLowerCase();
-     *   }
-     * });
+     * function capitalize(string) {
+     *   return string.charAt(0).toUpperCase() + string.slice(1).toLowerCase();
+     * }
      *
-     * _.capitalize('moe');
-     * // => 'Moe'
+     * _.mixin({ 'capitalize': capitalize });
+     * _.capitalize('fred');
+     * // => 'Fred'
      *
-     * _('moe').capitalize();
-     * // => 'Moe'
+     * _('fred').capitalize().value();
+     * // => 'Fred'
+     *
+     * _.mixin({ 'capitalize': capitalize }, { 'chain': false });
+     * _('fred').capitalize();
+     * // => 'Fred'
      */
-    function mixin(object, source) {
-      var ctor = object,
-          isFunc = !source || isFunction(ctor);
+    function mixin(object, source, options) {
+      var chain = true,
+          methodNames = source && functions(source);
 
-      if (!source) {
+      if (!source || (!options && !methodNames.length)) {
+        if (options == null) {
+          options = source;
+        }
         ctor = lodashWrapper;
         source = object;
         object = lodash;
+        methodNames = functions(source);
       }
-      forEach(functions(source), function(methodName) {
+      if (options === false) {
+        chain = false;
+      } else if (isObject(options) && 'chain' in options) {
+        chain = options.chain;
+      }
+      var ctor = object,
+          isFunc = isFunction(ctor);
+
+      forEach(methodNames, function(methodName) {
         var func = object[methodName] = source[methodName];
         if (isFunc) {
           ctor.prototype[methodName] = function() {
-            var value = this.__wrapped__,
+            var chainAll = this.__chain__,
+                value = this.__wrapped__,
                 args = [value];
 
             push.apply(args, arguments);
             var result = func.apply(object, args);
-            return (value && typeof value == 'object' && value === result)
-              ? this
-              : new ctor(result);
+            if (chain || chainAll) {
+              if (value === result && isObject(result)) {
+                return this;
+              }
+              result = new ctor(result);
+              result.__chain__ = chainAll;
+            }
+            return result;
           };
         }
       });
@@ -6348,6 +6260,39 @@ define("vendor/almond", function(){});
     }
 
     /**
+     * A no-operation function.
+     *
+     * @static
+     * @memberOf _
+     * @category Utilities
+     * @example
+     *
+     * var object = { 'name': 'fred' };
+     * _.noop(object) === undefined;
+     * // => true
+     */
+    function noop() {
+      // no operation performed
+    }
+
+    /**
+     * Gets the number of milliseconds that have elapsed since the Unix epoch
+     * (1 January 1970 00:00:00 UTC).
+     *
+     * @static
+     * @memberOf _
+     * @category Utilities
+     * @example
+     *
+     * var stamp = _.now();
+     * _.defer(function() { console.log(_.now() - stamp); });
+     * // => logs the number of milliseconds it took for the deferred function to be called
+     */
+    var now = isNative(now = Date.now) && now || function() {
+      return new Date().getTime();
+    };
+
+    /**
      * Converts the given value into an integer of the specified radix.
      * If `radix` is `undefined` or `0` a `radix` of `10` is used unless the
      * `value` is a hexadecimal, in which case a `radix` of `16` is used.
@@ -6367,9 +6312,39 @@ define("vendor/almond", function(){});
      * // => 8
      */
     var parseInt = nativeParseInt(whitespace + '08') == 8 ? nativeParseInt : function(value, radix) {
-      // Firefox and Opera still follow the ES3 specified implementation of `parseInt`
+      // Firefox < 21 and Opera < 15 follow the ES3 specified implementation of `parseInt`
       return nativeParseInt(isString(value) ? value.replace(reLeadingSpacesAndZeros, '') : value, radix || 0);
     };
+
+    /**
+     * Creates a "_.pluck" style function, which returns the `key` value of a
+     * given object.
+     *
+     * @static
+     * @memberOf _
+     * @category Utilities
+     * @param {string} key The name of the property to retrieve.
+     * @returns {Function} Returns the new function.
+     * @example
+     *
+     * var characters = [
+     *   { 'name': 'fred',   'age': 40 },
+     *   { 'name': 'barney', 'age': 36 }
+     * ];
+     *
+     * var getName = _.property('name');
+     *
+     * _.map(characters, getName);
+     * // => ['barney', 'fred']
+     *
+     * _.sortBy(characters, getName);
+     * // => [{ 'name': 'barney', 'age': 36 }, { 'name': 'fred',   'age': 40 }]
+     */
+    function property(key) {
+      return function(object) {
+        return object[key];
+      };
+    }
 
     /**
      * Produces a random number between `min` and `max` (inclusive). If only one
@@ -6422,14 +6397,15 @@ define("vendor/almond", function(){});
       } else {
         max = +max || 0;
       }
-      var rand = nativeRandom();
-      return (floating || min % 1 || max % 1)
-        ? min + nativeMin(rand * (max - min + parseFloat('1e-' + ((rand +'').length - 1))), max)
-        : min + floor(rand * (max - min + 1));
+      if (floating || min % 1 || max % 1) {
+        var rand = nativeRandom();
+        return nativeMin(min + (rand * (max - min + parseFloat('1e-' + ((rand +'').length - 1)))), max);
+      }
+      return baseRandom(min, max);
     }
 
     /**
-     * Resolves the value of `property` on `object`. If `property` is a function
+     * Resolves the value of property `key` on `object`. If `key` is a function
      * it will be invoked with the `this` binding of `object` and its result returned,
      * else the property value is returned. If `object` is falsey then `undefined`
      * is returned.
@@ -6438,7 +6414,7 @@ define("vendor/almond", function(){});
      * @memberOf _
      * @category Utilities
      * @param {Object} object The object to inspect.
-     * @param {string} property The property to get the value of.
+     * @param {string} key The name of the property to resolve.
      * @returns {*} Returns the resolved value.
      * @example
      *
@@ -6455,197 +6431,11 @@ define("vendor/almond", function(){});
      * _.result(object, 'stuff');
      * // => 'nonsense'
      */
-    function result(object, property) {
+    function result(object, key) {
       if (object) {
-        var value = object[property];
-        return isFunction(value) ? object[property]() : value;
+        var value = object[key];
+        return isFunction(value) ? object[key]() : value;
       }
-    }
-
-    /**
-     * A micro-templating method that handles arbitrary delimiters, preserves
-     * whitespace, and correctly escapes quotes within interpolated code.
-     *
-     * Note: In the development build, `_.template` utilizes sourceURLs for easier
-     * debugging. See http://www.html5rocks.com/en/tutorials/developertools/sourcemaps/#toc-sourceurl
-     *
-     * For more information on precompiling templates see:
-     * http://lodash.com/#custom-builds
-     *
-     * For more information on Chrome extension sandboxes see:
-     * http://developer.chrome.com/stable/extensions/sandboxingEval.html
-     *
-     * @static
-     * @memberOf _
-     * @category Utilities
-     * @param {string} text The template text.
-     * @param {Object} data The data object used to populate the text.
-     * @param {Object} [options] The options object.
-     * @param {RegExp} [options.escape] The "escape" delimiter.
-     * @param {RegExp} [options.evaluate] The "evaluate" delimiter.
-     * @param {Object} [options.imports] An object to import into the template as local variables.
-     * @param {RegExp} [options.interpolate] The "interpolate" delimiter.
-     * @param {string} [sourceURL] The sourceURL of the template's compiled source.
-     * @param {string} [variable] The data object variable name.
-     * @returns {Function|string} Returns a compiled function when no `data` object
-     *  is given, else it returns the interpolated text.
-     * @example
-     *
-     * // using the "interpolate" delimiter to create a compiled template
-     * var compiled = _.template('hello <%= name %>');
-     * compiled({ 'name': 'moe' });
-     * // => 'hello moe'
-     *
-     * // using the "escape" delimiter to escape HTML in data property values
-     * _.template('<b><%- value %></b>', { 'value': '<script>' });
-     * // => '<b>&lt;script&gt;</b>'
-     *
-     * // using the "evaluate" delimiter to generate HTML
-     * var list = '<% _.forEach(people, function(name) { %><li><%- name %></li><% }); %>';
-     * _.template(list, { 'people': ['moe', 'larry'] });
-     * // => '<li>moe</li><li>larry</li>'
-     *
-     * // using the ES6 delimiter as an alternative to the default "interpolate" delimiter
-     * _.template('hello ${ name }', { 'name': 'curly' });
-     * // => 'hello curly'
-     *
-     * // using the internal `print` function in "evaluate" delimiters
-     * _.template('<% print("hello " + name); %>!', { 'name': 'larry' });
-     * // => 'hello larry!'
-     *
-     * // using a custom template delimiters
-     * _.templateSettings = {
-     *   'interpolate': /{{([\s\S]+?)}}/g
-     * };
-     *
-     * _.template('hello {{ name }}!', { 'name': 'mustache' });
-     * // => 'hello mustache!'
-     *
-     * // using the `imports` option to import jQuery
-     * var list = '<% $.each(people, function(name) { %><li><%- name %></li><% }); %>';
-     * _.template(list, { 'people': ['moe', 'larry'] }, { 'imports': { '$': jQuery } });
-     * // => '<li>moe</li><li>larry</li>'
-     *
-     * // using the `sourceURL` option to specify a custom sourceURL for the template
-     * var compiled = _.template('hello <%= name %>', null, { 'sourceURL': '/basic/greeting.jst' });
-     * compiled(data);
-     * // => find the source of "greeting.jst" under the Sources tab or Resources panel of the web inspector
-     *
-     * // using the `variable` option to ensure a with-statement isn't used in the compiled template
-     * var compiled = _.template('hi <%= data.name %>!', null, { 'variable': 'data' });
-     * compiled.source;
-     * // => function(data) {
-     *   var __t, __p = '', __e = _.escape;
-     *   __p += 'hi ' + ((__t = ( data.name )) == null ? '' : __t) + '!';
-     *   return __p;
-     * }
-     *
-     * // using the `source` property to inline compiled templates for meaningful
-     * // line numbers in error messages and a stack trace
-     * fs.writeFileSync(path.join(cwd, 'jst.js'), '\
-     *   var JST = {\
-     *     "main": ' + _.template(mainText).source + '\
-     *   };\
-     * ');
-     */
-    function template(text, data, options) {
-      // based on John Resig's `tmpl` implementation
-      // http://ejohn.org/blog/javascript-micro-templating/
-      // and Laura Doktorova's doT.js
-      // https://github.com/olado/doT
-      var settings = lodash.templateSettings;
-      text || (text = '');
-
-      // avoid missing dependencies when `iteratorTemplate` is not defined
-      options = iteratorTemplate ? defaults({}, options, settings) : settings;
-
-      var imports = iteratorTemplate && defaults({}, options.imports, settings.imports),
-          importsKeys = iteratorTemplate ? keys(imports) : ['_'],
-          importsValues = iteratorTemplate ? values(imports) : [lodash];
-
-      var isEvaluating,
-          index = 0,
-          interpolate = options.interpolate || reNoMatch,
-          source = "__p += '";
-
-      // compile the regexp to match each delimiter
-      var reDelimiters = RegExp(
-        (options.escape || reNoMatch).source + '|' +
-        interpolate.source + '|' +
-        (interpolate === reInterpolate ? reEsTemplate : reNoMatch).source + '|' +
-        (options.evaluate || reNoMatch).source + '|$'
-      , 'g');
-
-      text.replace(reDelimiters, function(match, escapeValue, interpolateValue, esTemplateValue, evaluateValue, offset) {
-        interpolateValue || (interpolateValue = esTemplateValue);
-
-        // escape characters that cannot be included in string literals
-        source += text.slice(index, offset).replace(reUnescapedString, escapeStringChar);
-
-        // replace delimiters with snippets
-        if (escapeValue) {
-          source += "' +\n__e(" + escapeValue + ") +\n'";
-        }
-        if (evaluateValue) {
-          isEvaluating = true;
-          source += "';\n" + evaluateValue + ";\n__p += '";
-        }
-        if (interpolateValue) {
-          source += "' +\n((__t = (" + interpolateValue + ")) == null ? '' : __t) +\n'";
-        }
-        index = offset + match.length;
-
-        // the JS engine embedded in Adobe products requires returning the `match`
-        // string in order to produce the correct `offset` value
-        return match;
-      });
-
-      source += "';\n";
-
-      // if `variable` is not specified, wrap a with-statement around the generated
-      // code to add the data object to the top of the scope chain
-      var variable = options.variable,
-          hasVariable = variable;
-
-      if (!hasVariable) {
-        variable = 'obj';
-        source = 'with (' + variable + ') {\n' + source + '\n}\n';
-      }
-      // cleanup code by stripping empty strings
-      source = (isEvaluating ? source.replace(reEmptyStringLeading, '') : source)
-        .replace(reEmptyStringMiddle, '$1')
-        .replace(reEmptyStringTrailing, '$1;');
-
-      // frame code as the function body
-      source = 'function(' + variable + ') {\n' +
-        (hasVariable ? '' : variable + ' || (' + variable + ' = {});\n') +
-        "var __t, __p = '', __e = _.escape" +
-        (isEvaluating
-          ? ', __j = Array.prototype.join;\n' +
-            "function print() { __p += __j.call(arguments, '') }\n"
-          : ';\n'
-        ) +
-        source +
-        'return __p\n}';
-
-      // Use a sourceURL for easier debugging.
-      // http://www.html5rocks.com/en/tutorials/developertools/sourcemaps/#toc-sourceurl
-      var sourceURL = '\n/*\n//# sourceURL=' + (options.sourceURL || '/lodash/template/source[' + (templateCounter++) + ']') + '\n*/';
-
-      try {
-        var result = Function(importsKeys, 'return ' + source + sourceURL).apply(undefined, importsValues);
-      } catch(e) {
-        e.source = source;
-        throw e;
-      }
-      if (data) {
-        return result(data);
-      }
-      // provide the compiled function's source by its `toString` method, in
-      // supported environments, or the `source` property as a convenience for
-      // inlining compiled templates during the build process
-      result.source = source;
-      return result;
     }
 
     /**
@@ -6695,8 +6485,8 @@ define("vendor/almond", function(){});
      * @returns {string} Returns the unescaped string.
      * @example
      *
-     * _.unescape('Moe, Larry &amp; Curly');
-     * // => 'Moe, Larry & Curly'
+     * _.unescape('Fred, Barney &amp; Pebbles');
+     * // => 'Fred, Barney & Pebbles'
      */
     function unescape(string) {
       return string == null ? '' : String(string).replace(reEscapedHtml, unescapeHtmlChar);
@@ -6726,7 +6516,8 @@ define("vendor/almond", function(){});
     /*--------------------------------------------------------------------------*/
 
     /**
-     * Creates a `lodash` object that wraps the given value.
+     * Creates a `lodash` object that wraps the given value with explicit
+     * method chaining enabled.
      *
      * @static
      * @memberOf _
@@ -6735,17 +6526,18 @@ define("vendor/almond", function(){});
      * @returns {Object} Returns the wrapper object.
      * @example
      *
-     * var stooges = [
-     *   { 'name': 'moe', 'age': 40 },
-     *   { 'name': 'larry', 'age': 50 },
-     *   { 'name': 'curly', 'age': 60 }
+     * var characters = [
+     *   { 'name': 'barney',  'age': 36 },
+     *   { 'name': 'fred',    'age': 40 },
+     *   { 'name': 'pebbles', 'age': 1 }
      * ];
      *
-     * var youngest = _.chain(stooges)
-     *     .sortBy(function(stooge) { return stooge.age; })
-     *     .map(function(stooge) { return stooge.name + ' is ' + stooge.age; })
-     *     .first();
-     * // => 'moe is 40'
+     * var youngest = _.chain(characters)
+     *     .sortBy('age')
+     *     .map(function(chr) { return chr.name + ' is ' + chr.age; })
+     *     .first()
+     *     .value();
+     * // => 'pebbles is 1'
      */
     function chain(value) {
       value = new lodashWrapper(value);
@@ -6768,12 +6560,10 @@ define("vendor/almond", function(){});
      * @example
      *
      * _([1, 2, 3, 4])
-     *  .filter(function(num) { return num % 2 == 0; })
-     *  .tap(function(array) { console.log(array); })
-     *  .map(function(num) { return num * num; })
+     *  .tap(function(array) { array.pop(); })
+     *  .reverse()
      *  .value();
-     * // => // [2, 4] (logged)
-     * // => [4, 16]
+     * // => [3, 2, 1]
      */
     function tap(value, interceptor) {
       interceptor(value);
@@ -6781,7 +6571,7 @@ define("vendor/almond", function(){});
     }
 
     /**
-     * Enables method chaining on the wrapper object.
+     * Enables explicit method chaining on the wrapper object.
      *
      * @name chain
      * @memberOf _
@@ -6789,11 +6579,21 @@ define("vendor/almond", function(){});
      * @returns {*} Returns the wrapper object.
      * @example
      *
-     * var sum = _([1, 2, 3])
-     *     .chain()
-     *     .reduce(function(sum, num) { return sum + num; })
-     *     .value()
-     * // => 6`
+     * var characters = [
+     *   { 'name': 'barney', 'age': 36 },
+     *   { 'name': 'fred',   'age': 40 }
+     * ];
+     *
+     * // without explicit chaining
+     * _(characters).first();
+     * // => { 'name': 'barney', 'age': 36 }
+     *
+     * // with explicit chaining
+     * _(characters).chain()
+     *   .first()
+     *   .pick('age')
+     *   .value();
+     * // => { 'age': 36 }
      */
     function wrapperChain() {
       this.__chain__ = true;
@@ -6845,7 +6645,9 @@ define("vendor/almond", function(){});
     lodash.chain = chain;
     lodash.compact = compact;
     lodash.compose = compose;
+    lodash.constant = constant;
     lodash.countBy = countBy;
+    lodash.create = create;
     lodash.createCallback = createCallback;
     lodash.curry = curry;
     lodash.debounce = debounce;
@@ -6870,6 +6672,7 @@ define("vendor/almond", function(){});
     lodash.invoke = invoke;
     lodash.keys = keys;
     lodash.map = map;
+    lodash.mapValues = mapValues;
     lodash.max = max;
     lodash.memoize = memoize;
     lodash.merge = merge;
@@ -6881,6 +6684,7 @@ define("vendor/almond", function(){});
     lodash.partialRight = partialRight;
     lodash.pick = pick;
     lodash.pluck = pluck;
+    lodash.property = property;
     lodash.pull = pull;
     lodash.range = range;
     lodash.reject = reject;
@@ -6899,6 +6703,7 @@ define("vendor/almond", function(){});
     lodash.where = where;
     lodash.without = without;
     lodash.wrap = wrap;
+    lodash.xor = xor;
     lodash.zip = zip;
     lodash.zipObject = zipObject;
 
@@ -6955,6 +6760,8 @@ define("vendor/almond", function(){});
     lodash.lastIndexOf = lastIndexOf;
     lodash.mixin = mixin;
     lodash.noConflict = noConflict;
+    lodash.noop = noop;
+    lodash.now = now;
     lodash.parseInt = parseInt;
     lodash.random = random;
     lodash.reduce = reduce;
@@ -6964,7 +6771,6 @@ define("vendor/almond", function(){});
     lodash.size = size;
     lodash.some = some;
     lodash.sortedIndex = sortedIndex;
-    lodash.template = template;
     lodash.unescape = unescape;
     lodash.uniqueId = uniqueId;
 
@@ -6978,20 +6784,15 @@ define("vendor/almond", function(){});
     lodash.include = contains;
     lodash.inject = reduce;
 
-    forOwn(lodash, function(func, methodName) {
-      if (!lodash.prototype[methodName]) {
-        lodash.prototype[methodName] = function() {
-          var args = [this.__wrapped__],
-              chainAll = this.__chain__;
-
-          push.apply(args, arguments);
-          var result = func.apply(lodash, args);
-          return chainAll
-            ? new lodashWrapper(result, chainAll)
-            : result;
-        };
-      }
-    });
+    mixin(function() {
+      var source = {}
+      forOwn(lodash, function(func, methodName) {
+        if (!lodash.prototype[methodName]) {
+          source[methodName] = func;
+        }
+      });
+      return source;
+    }(), false);
 
     /*--------------------------------------------------------------------------*/
 
@@ -7027,7 +6828,7 @@ define("vendor/almond", function(){});
      * @memberOf _
      * @type string
      */
-    lodash.VERSION = '2.1.0';
+    lodash.VERSION = '2.4.1';
 
     // add "Chaining" functions to the wrapper
     lodash.prototype.chain = wrapperChain;
@@ -7036,7 +6837,7 @@ define("vendor/almond", function(){});
     lodash.prototype.valueOf = wrapperValueOf;
 
     // add `Array` functions that return unwrapped values
-    baseEach(['join', 'pop', 'shift'], function(methodName) {
+    forEach(['join', 'pop', 'shift'], function(methodName) {
       var func = arrayRef[methodName];
       lodash.prototype[methodName] = function() {
         var chainAll = this.__chain__,
@@ -7048,8 +6849,8 @@ define("vendor/almond", function(){});
       };
     });
 
-    // add `Array` functions that return the wrapped value
-    baseEach(['push', 'reverse', 'sort', 'unshift'], function(methodName) {
+    // add `Array` functions that return the existing wrapped value
+    forEach(['push', 'reverse', 'sort', 'unshift'], function(methodName) {
       var func = arrayRef[methodName];
       lodash.prototype[methodName] = function() {
         func.apply(this.__wrapped__, arguments);
@@ -7058,39 +6859,12 @@ define("vendor/almond", function(){});
     });
 
     // add `Array` functions that return new wrapped values
-    baseEach(['concat', 'slice', 'splice'], function(methodName) {
+    forEach(['concat', 'slice', 'splice'], function(methodName) {
       var func = arrayRef[methodName];
       lodash.prototype[methodName] = function() {
         return new lodashWrapper(func.apply(this.__wrapped__, arguments), this.__chain__);
       };
     });
-
-    // avoid array-like object bugs with `Array#shift` and `Array#splice`
-    // in Firefox < 10 and IE < 9
-    if (!support.spliceObjects) {
-      baseEach(['pop', 'shift', 'splice'], function(methodName) {
-        var func = arrayRef[methodName],
-            isSplice = methodName == 'splice';
-
-        lodash.prototype[methodName] = function() {
-          var chainAll = this.__chain__,
-              value = this.__wrapped__,
-              result = func.apply(value, arguments);
-
-          if (value.length === 0) {
-            delete value[0];
-          }
-          return (chainAll || isSplice)
-            ? new lodashWrapper(result, chainAll)
-            : result;
-        };
-      });
-    }
-
-    // add pseudo private property to be used and removed during the build process
-    lodash._baseEach = baseEach;
-    lodash._iteratorTemplate = iteratorTemplate;
-    lodash._shimKeys = shimKeys;
 
     return lodash;
   }
@@ -7100,12 +6874,11 @@ define("vendor/almond", function(){});
   // expose Lo-Dash
   var _ = runInContext();
 
-  // some AMD build optimizers, like r.js, check for condition patterns like the following:
+  // some AMD build optimizers like r.js check for condition patterns like the following:
   if (typeof define == 'function' && typeof define.amd == 'object' && define.amd) {
     // Expose Lo-Dash to the global object even when an AMD loader is present in
-    // case Lo-Dash was injected by a third-party script and not intended to be
-    // loaded as a module. The global assignment can be reverted in the Lo-Dash
-    // module by its `noConflict()` method.
+    // case Lo-Dash is loaded with a RequireJS shim config.
+    // See http://requirejs.org/docs/api.html#config-shim
     root._ = _;
 
     // define as an anonymous module so, through path mapping, it can be
@@ -7944,7 +7717,7 @@ define('emmet/utils/common',['require','exports','module','lodash','../assets/ra
 			}
 			
 			try {
-				return (new Function('return ' + str))();
+				return JSON.parse(str);
 			} catch(e) {
 				return {};
 			}
@@ -8203,6 +7976,2514 @@ define('emmet/assets/stringStream',['require','exports','module'],function(requi
 	/** @deprecated */
 	module.exports.create = module.exports;
 	return module.exports;
+});
+/**
+ * Utility module for working with comments in source code
+ * (mostly stripping it from source)
+ */
+if (typeof module === 'object' && typeof define !== 'function') {
+	var define = function (factory) {
+		module.exports = factory(require, exports, module);
+	};
+}
+
+define('emmet/utils/comments',['require','exports','module','lodash','./common','../assets/range','../assets/stringStream'],function(require, exports, module) {
+	var _ = require('lodash');
+	var utils = require('./common');
+	var range = require('../assets/range');
+	var stringStream = require('../assets/stringStream');
+	var reHasComment = /\/\*|\/\//;
+
+	return {
+		/**
+		 * Replaces all comments in given CSS source with spaces,
+		 * which allows more reliable (and faster) token search
+		 * in CSS content
+		 * @param  {String} content CSS content
+		 * @return {String}
+		 */
+		strip: function(content) {
+			if (!reHasComment.test(content)) {
+				return content;
+			}
+
+			var stream = stringStream(content);
+			var replaceRanges = [];
+			var ch, ch2;
+
+			while ((ch = stream.next())) {
+				if (ch === '/') {
+					ch2 = stream.peek();
+					if (ch2 === '*') { // multiline CSS comment
+						stream.start = stream.pos - 1;
+
+						if (stream.skipTo('*/')) {
+							stream.pos += 2;
+						} else {
+							// unclosed comment
+							stream.skipToEnd();
+						}
+
+						replaceRanges.push([stream.start, stream.pos]);
+					} else if (ch2 === '/') {
+						// preprocessor’s single line comments
+						stream.start = stream.pos - 1;
+						while ((ch2 = stream.next())) {
+							if (ch2 === '\n' || ch2 == '\r') {
+								break
+							}
+						}
+
+						replaceRanges.push([stream.start, stream.pos]);
+					}
+				} else {
+					stream.skipQuoted();
+				}
+			}
+
+			return utils.replaceWith(content, replaceRanges, ' ');
+		}
+	};
+});
+if (typeof module === 'object' && typeof define !== 'function') {
+	var define = function (factory) {
+		module.exports = factory(require, exports, module);
+	};
+}
+
+define('emmet/parser/css',['require','exports','module'],function(require, exports, module) {
+	var session = {tokens: null};
+	
+	// walks around the source
+	var walker = {
+		init: function (source) {
+			// this.source = source.replace(/\r\n?/g, '\n');
+			this.source = source;
+			this.ch = '';
+			this.chnum = -1;
+		
+			// advance
+			this.nextChar();
+		},
+		nextChar: function () {
+			return this.ch = this.source.charAt(++this.chnum);
+		},
+		peek: function() {
+			return this.source.charAt(this.chnum + 1);
+		}
+	};
+
+	// utility helpers
+	function isNameChar(c, cc) {
+		cc = cc || c.charCodeAt(0);
+		return (
+			(cc >= 97 && cc <= 122 /* a-z */) || 
+			(cc >= 65 && cc <= 90 /* A-Z */) || 
+			/* 
+			Experimental: include cyrillic ranges 
+			since some letters, similar to latin ones, can 
+			accidentally appear in CSS tokens
+			*/
+			(cc >= 1024 && cc <= 1279) || 
+			c === '&' || /* selector placeholder (LESS, SCSS) */
+			c === '_' || 
+			c === '<' || /* comparisons (LESS, SCSS) */
+			c === '>' || 
+			c === '=' || 
+			c === '-'
+		);
+	}
+
+	function isDigit(c, cc) {
+		cc = cc || c.charCodeAt(0);
+		return (cc >= 48 && cc <= 57);
+	}
+
+	var isOp = (function () {
+		var opsa = "{}[]()+*=.,;:>~|\\%$#@^!".split(''),
+			opsmatcha = "*^|$~".split(''),
+			ops = {},
+			opsmatch = {},
+			i = 0;
+		for (; i < opsa.length; i += 1) {
+			ops[opsa[i]] = true;
+		}
+		for (i = 0; i < opsmatcha.length; i += 1) {
+			opsmatch[opsmatcha[i]] = true;
+		}
+		return function (ch, matchattr) {
+			if (matchattr) {
+				return ch in opsmatch;
+			}
+			return ch in ops;
+		};
+	}());
+	
+	// creates token objects and pushes them to a list
+	function tokener(value, type) {
+		session.tokens.push({
+			value: value,
+			type:  type || value,
+			start: null,
+			end:   null
+		});
+	}
+
+	function getPosInfo(w) {
+		var errPos = w.chnum;
+		var source = w.source.replace(/\r\n?/g, '\n');
+		var part = w.source.substring(0, errPos + 1).replace(/\r\n?/g, '\n');
+		var lines = part.split('\n');
+		var ch = (lines[lines.length - 1] || '').length;
+		var fullLine = source.split('\n')[lines.length - 1] || '';
+		
+		var chunkSize = 100;
+		var offset = Math.max(0, ch - chunkSize);
+		var formattedLine = fullLine.substr(offset, chunkSize * 2) + '\n';
+		for (var i = 0; i < ch - offset - 1; i++) {
+			formattedLine += '-';
+		}
+		formattedLine += '^';
+
+		return {
+			line: lines.length,
+			ch: ch,
+			text: fullLine,
+			hint: formattedLine
+		};
+	}
+
+	function raiseError(message) {
+		var err = error(message);
+		var errObj = new Error(err.message, '', err.line);
+		errObj.line = err.line;
+		errObj.ch = err.ch;
+		errObj.name = err.name;
+		errObj.hint = err.hint;
+
+		throw errObj;
+	}
+	
+	// oops
+	function error(m) { 
+		var w = walker;
+		var info = getPosInfo(walker);
+		var tokens = session.tokens;
+		session.tokens = null;
+
+		var message = 'CSS parsing error at line ' + info.line + ', char ' + info.ch + ': ' + m;
+		message += '\n' +  info.hint;
+		return {
+			name: "ParseError",
+			message: message,
+			hint: info.hint,
+			line: info.line,
+			ch: info.ch
+		};
+	}
+
+
+	// token handlers follow for:
+	// white space, comment, string, identifier, number, operator
+	function white() {
+		var c = walker.ch,
+			token = '';
+	
+		while (c === " " || c === "\t") {
+			token += c;
+			c = walker.nextChar();
+		}
+	
+		tokener(token, 'white');
+	
+	}
+
+	function comment() {
+		var w = walker,
+			c = w.ch,
+			token = c,
+			cnext;
+	 
+		cnext = w.nextChar();
+
+		if (cnext === '/') {
+			// inline comment in SCSS and LESS
+			while (c && !(cnext === "\n" || cnext === "\r")) {
+				token += cnext;
+				c = cnext;
+				cnext = w.nextChar();
+			}
+		} else if (cnext === '*') {
+			// multiline CSS commment
+			while (c && !(c === "*" && cnext === "/")) {
+				token += cnext;
+				c = cnext;
+				cnext = w.nextChar();
+			}
+		} else {
+			// oops, not a comment, just a /
+			return tokener(token, token);
+		}
+		
+		token += cnext;
+		w.nextChar();
+		tokener(token, 'comment');
+	}
+
+	function eatString() {
+		var w = walker,
+			c = w.ch,
+			q = c,
+			token = c,
+			cnext;
+	
+		c = w.nextChar();
+
+		while (c !== q) {
+			if (c === '\n') {
+				cnext = w.nextChar();
+				if (cnext === "\\") {
+					token += c + cnext;
+				} else {
+					// end of line with no \ escape = bad
+					raiseError("Unterminated string");
+				}
+			} else {
+				if (c === "\\") {
+					token += c + w.nextChar();
+				} else {
+					token += c;
+				}
+			}
+		
+			c = w.nextChar();
+		}
+
+		token += c;
+
+		return token;
+	}
+
+	function str() {
+		var token = eatString();
+		walker.nextChar();
+		tokener(token, 'string');
+	}
+	
+	function brace() {
+		var w = walker,
+			c = w.ch,
+			depth = 1,
+			token = c,
+			stop = false;
+	
+		c = w.nextChar();
+	
+		while (c && !stop) {
+			if (c === '(') {
+				depth++;
+			} else if (c === ')') {
+				depth--;
+				if (!depth) {
+					stop = true;
+				}
+			} else if (c === '"' || c === "'") {
+				c = eatString();
+			} else if (c === '') {
+				raiseError("Unterminated brace");
+			}
+			
+			token += c;
+			c = w.nextChar();
+		}
+		
+		tokener(token, 'brace');
+	}
+
+	function identifier(pre) {
+		var c = walker.ch;
+		var token = pre ? pre + c : c;
+			
+		c = walker.nextChar();
+		var cc = c.charCodeAt(0);
+		while (isNameChar(c, cc) || isDigit(c, cc)) {
+			token += c;
+			c = walker.nextChar();
+			cc = c.charCodeAt(0);
+		}
+	
+		tokener(token, 'identifier');
+	}
+
+	function num() {
+		var w = walker,
+			c = w.ch,
+			token = c,
+			point = token === '.',
+			nondigit;
+		
+		c = w.nextChar();
+		nondigit = !isDigit(c);
+	
+		// .2px or .classname?
+		if (point && nondigit) {
+			// meh, NaN, could be a class name, so it's an operator for now
+			return tokener(token, '.');    
+		}
+		
+		// -2px or -moz-something
+		if (token === '-' && nondigit) {
+			return identifier('-');
+		}
+	
+		while (c !== '' && (isDigit(c) || (!point && c === '.'))) { // not end of source && digit or first instance of .
+			if (c === '.') {
+				point = true;
+			}
+			token += c;
+			c = w.nextChar();
+		}
+
+		tokener(token, 'number');    
+	
+	}
+
+	function op() {
+		var w = walker,
+			c = w.ch,
+			token = c,
+			next = w.nextChar();
+			
+		if (next === "=" && isOp(token, true)) {
+			token += next;
+			tokener(token, 'match');
+			w.nextChar();
+			return;
+		} 
+		
+		tokener(token, token);
+	}
+
+
+	// call the appropriate handler based on the first character in a token suspect
+	function tokenize() {
+		var ch = walker.ch;
+	
+		if (ch === " " || ch === "\t") {
+			return white();
+		}
+
+		if (ch === '/') {
+			return comment();
+		} 
+
+		if (ch === '"' || ch === "'") {
+			return str();
+		}
+		
+		if (ch === '(') {
+			return brace();
+		}
+	
+		if (ch === '-' || ch === '.' || isDigit(ch)) { // tricky - char: minus (-1px) or dash (-moz-stuff)
+			return num();
+		}
+	
+		if (isNameChar(ch)) {
+			return identifier();
+		}
+
+		if (isOp(ch)) {
+			return op();
+		}
+
+		if (ch === '\r') {
+			if (walker.peek() === '\n') {
+				ch += walker.nextChar();
+			}
+
+			tokener(ch, 'line');
+			walker.nextChar();
+			return;
+		}
+		
+		if (ch === '\n') {
+			tokener(ch, 'line');
+			walker.nextChar();
+			return;
+		}
+		
+		raiseError("Unrecognized character '" + ch + "'");
+	}
+
+	return {
+		/**
+		 * Sprits given source into tokens
+		 * @param {String} source
+		 * @returns {Array}
+		 */
+		lex: function (source) {
+			walker.init(source);
+			session.tokens = [];
+
+			// for empty source, return single space token
+			if (!source) {
+				session.tokens.push(this.white());
+			} else {
+				while (walker.ch !== '') {
+					tokenize();
+				}
+			}
+
+			var tokens = session.tokens;
+			session.tokens = null;
+			return tokens;
+		},
+		
+		/**
+		 * Tokenizes CSS source. It's like `lex()` method,
+		 * but also stores proper token indexes in source, 
+		 * so it's a bit slower
+		 * @param {String} source
+		 * @returns {Array}
+		 */
+		parse: function(source) {
+			// transform tokens
+			var tokens = this.lex(source), pos = 0, token;
+			for (var i = 0, il = tokens.length; i < il; i++) {
+				token = tokens[i];
+				token.start = pos;
+				token.end = (pos += token.value.length);
+			}
+			return tokens;
+		},
+
+		white: function() {
+			return {
+				value: '',
+				type:  'white',
+				start: 0,
+				end:   0
+			};
+		},
+		
+		toSource: function(toks) {
+			var i = 0, max = toks.length, src = '';
+			for (; i < max; i++) {
+				src += toks[i].value;
+			}
+			return src;
+		}
+	};
+});
+/**
+ * HTML matcher: takes string and searches for HTML tag pairs for given position 
+ * 
+ * Unlike “classic” matchers, it parses content from the specified 
+ * position, not from the start, so it may work even outside HTML documents
+ * (for example, inside strings of programming languages like JavaScript, Python 
+ * etc.)
+ */
+if (typeof module === 'object' && typeof define !== 'function') {
+	var define = function (factory) {
+		module.exports = factory(require, exports, module);
+	};
+}
+
+define('emmet/assets/htmlMatcher',['require','exports','module','./range'],function(require, exports, module) {
+	var range = require('./range');
+
+	// Regular Expressions for parsing tags and attributes
+	var reOpenTag = /^<([\w\:\-]+)((?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*)\s*(\/?)>/;
+	var reCloseTag = /^<\/([\w\:\-]+)[^>]*>/;
+
+	function openTag(i, match) {
+		return {
+			name: match[1],
+			selfClose: !!match[3],
+			/** @type Range */
+			range: range(i, match[0]),
+			type: 'open'
+		};
+	}
+	
+	function closeTag(i, match) {
+		return {
+			name: match[1],
+			/** @type Range */
+			range: range(i, match[0]),
+			type: 'close'
+		};
+	}
+	
+	function comment(i, match) {
+		return {
+			/** @type Range */
+			range: range(i, typeof match == 'number' ? match - i : match[0]),
+			type: 'comment'
+		};
+	}
+	
+	/**
+	 * Creates new tag matcher session
+	 * @param {String} text
+	 */
+	function createMatcher(text) {
+		var memo = {}, m;
+		return {
+			/**
+			 * Test if given position matches opening tag
+			 * @param {Number} i
+			 * @returns {Object} Matched tag object
+			 */
+			open: function(i) {
+				var m = this.matches(i);
+				return m && m.type == 'open' ? m : null;
+			},
+			
+			/**
+			 * Test if given position matches closing tag
+			 * @param {Number} i
+			 * @returns {Object} Matched tag object
+			 */
+			close: function(i) {
+				var m = this.matches(i);
+				return m && m.type == 'close' ? m : null;
+			},
+			
+			/**
+			 * Matches either opening or closing tag for given position
+			 * @param i
+			 * @returns
+			 */
+			matches: function(i) {
+				var key = 'p' + i;
+				
+				if (!(key in memo)) {
+					memo[key] = false;
+					if (text.charAt(i) == '<') {
+						var substr = text.slice(i);
+						if ((m = substr.match(reOpenTag))) {
+							memo[key] = openTag(i, m);
+						} else if ((m = substr.match(reCloseTag))) {
+							memo[key] = closeTag(i, m);
+						}
+					}
+				}
+				
+				return memo[key];
+			},
+			
+			/**
+			 * Returns original text
+			 * @returns {String}
+			 */
+			text: function() {
+				return text;
+			},
+
+			clean: function() {
+				memo = text = m = null;
+			}
+		};
+	}
+	
+	function matches(text, pos, pattern) {
+		return text.substring(pos, pos + pattern.length) == pattern;
+	}
+	
+	/**
+	 * Search for closing pair of opening tag
+	 * @param {Object} open Open tag instance
+	 * @param {Object} matcher Matcher instance
+	 */
+	function findClosingPair(open, matcher) {
+		var stack = [], tag = null;
+		var text = matcher.text();
+		
+		for (var pos = open.range.end, len = text.length; pos < len; pos++) {
+			if (matches(text, pos, '<!--')) {
+				// skip to end of comment
+				for (var j = pos; j < len; j++) {
+					if (matches(text, j, '-->')) {
+						pos = j + 3;
+						break;
+					}
+				}
+			}
+			
+			if ((tag = matcher.matches(pos))) {
+				if (tag.type == 'open' && !tag.selfClose) {
+					stack.push(tag.name);
+				} else if (tag.type == 'close') {
+					if (!stack.length) { // found valid pair?
+						return tag.name == open.name ? tag : null;
+					}
+					
+					// check if current closing tag matches previously opened one
+					if (stack[stack.length - 1] == tag.name) {
+						stack.pop();
+					} else {
+						var found = false;
+						while (stack.length && !found) {
+							var last = stack.pop();
+							if (last == tag.name) {
+								found = true;
+							}
+						}
+						
+						if (!stack.length && !found) {
+							return tag.name == open.name ? tag : null;
+						}
+					}
+				}
+
+				pos = tag.range.end - 1;
+			}
+		}
+	}
+	
+	return {
+		/**
+		 * Main function: search for tag pair in <code>text</code> for given 
+		 * position
+		 * @memberOf htmlMatcher
+		 * @param {String} text 
+		 * @param {Number} pos
+		 * @returns {Object}
+		 */
+		find: function(text, pos) {
+			var matcher = createMatcher(text); 
+			var open = null, close = null;
+			var j, jl;
+			
+			for (var i = pos; i >= 0; i--) {
+				if ((open = matcher.open(i))) {
+					// found opening tag
+					if (open.selfClose) {
+						if (open.range.cmp(pos, 'lt', 'gt')) {
+							// inside self-closing tag, found match
+							break;
+						}
+						
+						// outside self-closing tag, continue
+						continue;
+					}
+					
+					close = findClosingPair(open, matcher);
+					if (close) {
+						// found closing tag.
+						var r = range.create2(open.range.start, close.range.end);
+						if (r.contains(pos)) {
+							break;
+						}
+					} else if (open.range.contains(pos)) {
+						// we inside empty HTML tag like <br>
+						break;
+					}
+					
+					open = null;
+				} else if (matches(text, i, '-->')) {
+					// skip back to comment start
+					for (j = i - 1; j >= 0; j--) {
+						if (matches(text, j, '-->')) {
+							// found another comment end, do nothing
+							break;
+						} else if (matches(text, j, '<!--')) {
+							i = j;
+							break;
+						}
+					}
+				} else if (matches(text, i, '<!--')) {
+					// we're inside comment, match it
+					for (j = i + 4, jl = text.length; j < jl; j++) {
+						if (matches(text, j, '-->')) {
+							j += 3;
+							break;
+						}
+					}
+					
+					open = comment(i, j);
+					break;
+				}
+			}
+			
+			matcher.clean();
+
+			if (open) {
+				var outerRange = null;
+				var innerRange = null;
+				
+				if (close) {
+					outerRange = range.create2(open.range.start, close.range.end);
+					innerRange = range.create2(open.range.end, close.range.start);
+				} else {
+					outerRange = innerRange = range.create2(open.range.start, open.range.end);
+				}
+				
+				if (open.type == 'comment') {
+					// adjust positions of inner range for comment
+					var _c = outerRange.substring(text);
+					innerRange.start += _c.length - _c.replace(/^<\!--\s*/, '').length;
+					innerRange.end -= _c.length - _c.replace(/\s*-->$/, '').length;
+				}
+				
+				return {
+					open: open,
+					close: close,
+					type: open.type == 'comment' ? 'comment' : 'tag',
+					innerRange: innerRange,
+					innerContent: function() {
+						return this.innerRange.substring(text);
+					},
+					outerRange: outerRange,
+					outerContent: function() {
+						return this.outerRange.substring(text);
+					},
+					range: !innerRange.length() || !innerRange.cmp(pos, 'lte', 'gte') ? outerRange : innerRange,
+					content: function() {
+						return this.range.substring(text);
+					},
+					source: text
+				};
+			}
+		},
+		
+		/**
+		 * The same as <code>find()</code> method, but restricts matched result 
+		 * to <code>tag</code> type
+		 * @param {String} text 
+		 * @param {Number} pos
+		 * @returns {Object}
+		 */
+		tag: function(text, pos) {
+			var result = this.find(text, pos);
+			if (result && result.type == 'tag') {
+				return result;
+			}
+		}
+	};
+});
+if (typeof module === 'object' && typeof define !== 'function') {
+	var define = function (factory) {
+		module.exports = factory(require, exports, module);
+	};
+}
+
+define('emmet/vendor/klass',['require','exports','module','lodash'],function(require, exports, module) {
+	var _ = require('lodash');
+
+	/**
+	 * Shared empty constructor function to aid in prototype-chain creation.
+	 */
+	var ctor = function(){};
+
+	/**
+	 * Helper function to correctly set up the prototype chain, for subclasses.
+	 * Similar to `goog.inherits`, but uses a hash of prototype properties and
+	 * class properties to be extended.
+	 * Took it from Backbone.
+	 * @param {Object} parent
+	 * @param {Object} protoProps
+	 * @param {Object} staticProps
+	 * @returns {Object}
+	 */
+	function inherits(parent, protoProps, staticProps) {
+		var child;
+
+		// The constructor function for the new subclass is either defined by
+		// you (the "constructor" property in your `extend` definition), or
+		// defaulted by us to simply call the parent's constructor.
+		if (protoProps && protoProps.hasOwnProperty('constructor')) {
+			child = protoProps.constructor;
+		} else {
+			child = function() {
+				parent.apply(this, arguments);
+			};
+		}
+
+		// Inherit class (static) properties from parent.
+		_.extend(child, parent);
+
+		// Set the prototype chain to inherit from `parent`, without calling
+		// `parent`'s constructor function.
+		ctor.prototype = parent.prototype;
+		child.prototype = new ctor();
+
+		// Add prototype properties (instance properties) to the subclass,
+		// if supplied.
+		if (protoProps)
+			_.extend(child.prototype, protoProps);
+
+		// Add static properties to the constructor function, if supplied.
+		if (staticProps)
+			_.extend(child, staticProps);
+
+		// Correctly set child's `prototype.constructor`.
+		child.prototype.constructor = child;
+
+		// Set a convenience property in case the parent's prototype is needed
+		// later.
+		child.__super__ = parent.prototype;
+
+		return child;
+	}
+
+	return {
+		/**
+		 * The self-propagating extend function for classes.
+		 * Took it from Backbone 
+		 * @param {Object} protoProps
+		 * @param {Object} classProps
+		 * @returns {Object}
+		 */
+		extend: function(protoProps, classProps) {
+			var child = inherits(this, protoProps, classProps);
+			child.extend = this.extend;
+			// a hack required to WSH inherit `toString` method
+			if (protoProps.hasOwnProperty('toString'))
+				child.prototype.toString = protoProps.toString;
+			return child;
+		}
+	};
+});
+/**
+ * Abstract implementation of edit tree interface.
+ * Edit tree is a named container of editable “name-value” child elements, 
+ * parsed from <code>source</code>. This container provides convenient methods
+ * for editing/adding/removing child elements. All these update actions are
+ * instantly reflected in the <code>source</code> code with respect of formatting.
+ * <br><br>
+ * For example, developer can create an edit tree from CSS rule and add or 
+ * remove properties from it–all changes will be immediately reflected in the 
+ * original source.
+ * <br><br>
+ * All classes defined in this module should be extended the same way as in
+ * Backbone framework: using <code>extend</code> method to create new class and 
+ * <code>initialize</code> method to define custom class constructor.
+ * 
+ * @example
+ * <pre><code>
+ * var MyClass = require('editTree/base').EditElement.extend({
+ *     initialize: function() {
+ *     // constructor code here
+ *   }
+ * });
+ * 
+ * var elem = new MyClass(); 
+ * </code></pre>
+ */
+if (typeof module === 'object' && typeof define !== 'function') {
+	var define = function (factory) {
+		module.exports = factory(require, exports, module);
+	};
+}
+
+define('emmet/editTree/base',['require','exports','module','lodash','../assets/range','../utils/common','../vendor/klass'],function(require, exports, module) {
+	var _ = require('lodash');
+	var range = require('../assets/range');
+	var utils = require('../utils/common');
+	var klass = require('../vendor/klass');
+	
+	/**
+	 * Named container of edited source
+	 * @type EditContainer
+	 * @param {String} source
+	 * @param {Object} options
+	 */
+	function EditContainer(source, options) {
+		this.options = _.extend({offset: 0}, options);
+		/**
+		 * Source code of edited structure. All changes in the structure are 
+		 * immediately reflected into this property
+		 */
+		this.source = source;
+		
+		/** 
+		 * List of all editable children
+		 * @private 
+		 */
+		this._children = [];
+		
+		/**
+		 * Hash of all positions of container
+		 * @private
+		 */
+		this._positions = {
+			name: 0
+		};
+		
+		this.initialize.apply(this, arguments);
+	}
+	
+	/**
+	 * The self-propagating extend function for classes.
+	 * @type Function
+	 */
+	EditContainer.extend = klass.extend;
+	
+	EditContainer.prototype = {
+		type: 'container',
+		/**
+		 * Child class constructor
+		 */
+		initialize: function() {},
+
+		/**
+		 * Make position absolute
+		 * @private
+		 * @param {Number} num
+		 * @param {Boolean} isAbsolute
+		 * @returns {Boolean}
+		 */
+		_pos: function(num, isAbsolute) {
+			return num + (isAbsolute ? this.options.offset : 0);
+		},
+		
+		/**
+		 * Replace substring of tag's source
+		 * @param {String} value
+		 * @param {Number} start
+		 * @param {Number} end
+		 * @private
+		 */
+		_updateSource: function(value, start, end) {
+			// create modification range
+			var r = range.create(start, _.isUndefined(end) ? 0 : end - start);
+			var delta = value.length - r.length();
+			
+			var update = function(obj) {
+				_.each(obj, function(v, k) {
+					if (v >= r.end)
+						obj[k] += delta;
+				});
+			};
+			
+			// update affected positions of current container
+			update(this._positions);
+			
+			// update affected positions of children
+			var recursiveUpdate = function(items) {
+				_.each(items, function(item) {
+					update(item._positions);
+					if (item.type == 'container') {
+						recursiveUpdate(item.list());
+					}
+				});
+			};
+
+			recursiveUpdate(this.list());
+			this.source = utils.replaceSubstring(this.source, value, r);
+		},
+			
+			
+		/**
+		 * Adds new attribute 
+		 * @param {String} name Property name
+		 * @param {String} value Property value
+		 * @param {Number} pos Position at which to insert new property. By 
+		 * default the property is inserted at the end of rule 
+		 * @returns {EditElement} Newly created element
+		 */
+		add: function(name, value, pos) {
+			// this is abstract implementation
+			var item = new EditElement(name, value);
+			this._children.push(item);
+			return item;
+		},
+		
+		/**
+		 * Returns attribute object
+		 * @param {String} name Attribute name or its index
+		 * @returns {EditElement}
+		 */
+		get: function(name) {
+			if (_.isNumber(name))
+				return this.list()[name];
+			
+			if (_.isString(name))
+				return _.find(this.list(), function(prop) {
+					return prop.name() === name;
+				});
+			
+			return name;
+		},
+		
+		/**
+		 * Returns all children by name or indexes
+		 * @param {Object} name Element name(s) or indexes (<code>String</code>,
+		 * <code>Array</code>, <code>Number</code>)
+		 * @returns {Array}
+		 */
+		getAll: function(name) {
+			if (!_.isArray(name))
+				name = [name];
+			
+			// split names and indexes
+			var names = [], indexes = [];
+			_.each(name, function(item) {
+				if (_.isString(item))
+					names.push(item);
+				else if (_.isNumber(item))
+					indexes.push(item);
+			});
+			
+			return _.filter(this.list(), function(attribute, i) {
+				return _.include(indexes, i) || _.include(names, attribute.name());
+			});
+		},
+
+		/**
+		 * Returns list of all editable child elements
+		 * @returns {Array}
+		 */
+		list: function() {
+			return this._children;
+		},
+
+		/**
+		 * Remove child element
+		 * @param {String} name Property name or its index
+		 */
+		remove: function(name) {
+			var element = this.get(name);
+			if (element) {
+				this._updateSource('', element.fullRange());
+				this._children = _.without(this._children, element);
+			}
+		},
+		
+		/**
+		 * Returns index of editble child in list
+		 * @param {Object} item
+		 * @returns {Number}
+		 */
+		indexOf: function(item) {
+			return _.indexOf(this.list(), this.get(item));
+		},
+		
+		/**
+		 * Returns or updates element value. If such element doesn't exists,
+		 * it will be created automatically and added at the end of child list.
+		 * @param {String} name Element name or its index
+		 * @param {String} value New element value
+		 * @returns {String}
+		 */
+		value: function(name, value, pos) {
+			var element = this.get(name);
+			if (element)
+				return element.value(value);
+			
+			if (!_.isUndefined(value)) {
+				// no such element — create it
+				return this.add(name, value, pos);
+			}
+		},
+		
+		/**
+		 * Returns all values of child elements found by <code>getAll()</code>
+		 * method
+		 * @param {Object} name Element name(s) or indexes (<code>String</code>,
+		 * <code>Array</code>, <code>Number</code>)
+		 * @returns {Array}
+		 */
+		values: function(name) {
+			return _.map(this.getAll(name), function(element) {
+				return element.value();
+			});
+		},
+		
+		/**
+		 * Sets or gets container name
+		 * @param {String} val New name. If not passed, current 
+		 * name is returned
+		 * @return {String}
+		 */
+		name: function(val) {
+			if (!_.isUndefined(val) && this._name !== (val = String(val))) {
+				this._updateSource(val, this._positions.name, this._positions.name + this._name.length);
+				this._name = val;
+			}
+			
+			return this._name;
+		},
+		
+		/**
+		 * Returns name range object
+		 * @param {Boolean} isAbsolute Return absolute range (with respect of 
+		 * rule offset)
+		 * @returns {Range}
+		 */
+		nameRange: function(isAbsolute) {
+			return range.create(this._positions.name + (isAbsolute ? this.options.offset : 0), this.name());
+		},
+
+		/**
+		 * Returns range of current source
+		 * @param {Boolean} isAbsolute
+		 */
+		range: function(isAbsolute) {
+			return range.create(isAbsolute ? this.options.offset : 0, this.valueOf());
+		},
+		
+		/**
+		 * Returns element that belongs to specified position
+		 * @param {Number} pos
+		 * @param {Boolean} isAbsolute
+		 * @returns {EditElement}
+		 */
+		itemFromPosition: function(pos, isAbsolute) {
+			return _.find(this.list(), function(elem) {
+				return elem.range(isAbsolute).inside(pos);
+			});
+		},
+		
+		/**
+		 * Returns source code of current container 
+		 * @returns {String}
+		 */
+		toString: function() {
+			return this.valueOf();
+		},
+
+		valueOf: function() {
+			return this.source;
+		}
+	};
+	
+	/**
+	 * @param {EditContainer} parent
+	 * @param {Object} nameToken
+	 * @param {Object} valueToken
+	 */
+	function EditElement(parent, nameToken, valueToken) {
+		/** @type EditContainer */
+		this.parent = parent;
+		
+		this._name = nameToken.value;
+		this._value = valueToken ? valueToken.value : '';
+		
+		this._positions = {
+			name: nameToken.start,
+			value: valueToken ? valueToken.start : -1
+		};
+		
+		this.initialize.apply(this, arguments);
+	}
+	
+	/**
+	 * The self-propagating extend function for classes.
+	 * @type Function
+	 */
+	EditElement.extend = klass.extend;
+	
+	EditElement.prototype = {
+		type: 'element',
+
+		/**
+		 * Child class constructor
+		 */
+		initialize: function() {},
+		
+		/**
+		 * Make position absolute
+		 * @private
+		 * @param {Number} num
+		 * @param {Boolean} isAbsolute
+		 * @returns {Boolean}
+		 */
+		_pos: function(num, isAbsolute) {
+			return num + (isAbsolute ? this.parent.options.offset : 0);
+		},
+			
+		/**
+		 * Sets of gets element value
+		 * @param {String} val New element value. If not passed, current 
+		 * value is returned
+		 * @returns {String}
+		 */
+		value: function(val) {
+			if (!_.isUndefined(val) && this._value !== (val = String(val))) {
+				this.parent._updateSource(val, this.valueRange());
+				this._value = val;
+			}
+			
+			return this._value;
+		},
+		
+		/**
+		 * Sets of gets element name
+		 * @param {String} val New element name. If not passed, current 
+		 * name is returned
+		 * @returns {String}
+		 */
+		name: function(val) {
+			if (!_.isUndefined(val) && this._name !== (val = String(val))) {
+				this.parent._updateSource(val, this.nameRange());
+				this._name = val;
+			}
+			
+			return this._name;
+		},
+		
+		/**
+		 * Returns position of element name token
+		 * @param {Boolean} isAbsolute Return absolute position
+		 * @returns {Number}
+		 */
+		namePosition: function(isAbsolute) {
+			return this._pos(this._positions.name, isAbsolute);
+		},
+		
+		/**
+		 * Returns position of element value token
+		 * @param {Boolean} isAbsolute Return absolute position
+		 * @returns {Number}
+		 */
+		valuePosition: function(isAbsolute) {
+			return this._pos(this._positions.value, isAbsolute);
+		},
+		
+		/**
+		 * Returns element name
+		 * @param {Boolean} isAbsolute Return absolute range 
+		 * @returns {Range}
+		 */
+		range: function(isAbsolute) {
+			return range.create(this.namePosition(isAbsolute), this.valueOf());
+		},
+		
+		/**
+		 * Returns full element range, including possible indentation
+		 * @param {Boolean} isAbsolute Return absolute range
+		 * @returns {Range}
+		 */
+		fullRange: function(isAbsolute) {
+			return this.range(isAbsolute);
+		},
+		
+		/**
+		 * Returns element name range
+		 * @param {Boolean} isAbsolute Return absolute range
+		 * @returns {Range}
+		 */
+		nameRange: function(isAbsolute) {
+			return range.create(this.namePosition(isAbsolute), this.name());
+		},
+		
+		/**
+		 * Returns element value range
+		 * @param {Boolean} isAbsolute Return absolute range
+		 * @returns {Range}
+		 */
+		valueRange: function(isAbsolute) {
+			return range.create(this.valuePosition(isAbsolute), this.value());
+		},
+		
+		/**
+		 * Returns current element string representation
+		 * @returns {String}
+		 */
+		toString: function() {
+			return this.valueOf();
+		},
+		
+		valueOf: function() {
+			return this.name() + this.value();
+		}
+	};
+	
+	return {
+		EditContainer: EditContainer,
+		EditElement: EditElement,
+		
+		/**
+		 * Creates token that can be fed to <code>EditElement</code>
+		 * @param {Number} start
+		 * @param {String} value
+		 * @param {String} type
+		 * @returns
+		 */
+		createToken: function(start, value, type) {
+			var obj = {
+				start: start || 0,
+				value: value || '',
+				type: type
+			};
+			
+			obj.end = obj.start + obj.value.length;
+			return obj;
+		}
+	};
+});
+/**
+ * HTML tokenizer by Marijn Haverbeke
+ * http://codemirror.net/
+ * @constructor
+ * @memberOf __xmlParseDefine
+ * @param {Function} require
+ * @param {Underscore} _
+ */
+if (typeof module === 'object' && typeof define !== 'function') {
+	var define = function (factory) {
+		module.exports = factory(require, exports, module);
+	};
+}
+
+define('emmet/parser/xml',['require','exports','module','lodash','../assets/stringStream'],function(require, exports, module) {
+	var _ = require('lodash');
+	var stringStream = require('../assets/stringStream');
+
+	var Kludges = {
+		autoSelfClosers : {},
+		implicitlyClosed : {},
+		contextGrabbers : {},
+		doNotIndent : {},
+		allowUnquoted : true,
+		allowMissing : true
+	};
+
+	// Return variables for tokenizers
+	var tagName = null, type = null;
+
+	function inText(stream, state) {
+		function chain(parser) {
+			state.tokenize = parser;
+			return parser(stream, state);
+		}
+
+		var ch = stream.next();
+		if (ch == "<") {
+			if (stream.eat("!")) {
+				if (stream.eat("[")) {
+					if (stream.match("CDATA["))
+						return chain(inBlock("atom", "]]>"));
+					else
+						return null;
+				} else if (stream.match("--"))
+					return chain(inBlock("comment", "-->"));
+				else if (stream.match("DOCTYPE", true, true)) {
+					stream.eatWhile(/[\w\._\-]/);
+					return chain(doctype(1));
+				} else
+					return null;
+			} else if (stream.eat("?")) {
+				stream.eatWhile(/[\w\._\-]/);
+				state.tokenize = inBlock("meta", "?>");
+				return "meta";
+			} else {
+				type = stream.eat("/") ? "closeTag" : "openTag";
+				stream.eatSpace();
+				tagName = "";
+				var c;
+				while ((c = stream.eat(/[^\s\u00a0=<>\"\'\/?]/)))
+					tagName += c;
+				state.tokenize = inTag;
+				return "tag";
+			}
+		} else if (ch == "&") {
+			var ok;
+			if (stream.eat("#")) {
+				if (stream.eat("x")) {
+					ok = stream.eatWhile(/[a-fA-F\d]/) && stream.eat(";");
+				} else {
+					ok = stream.eatWhile(/[\d]/) && stream.eat(";");
+				}
+			} else {
+				ok = stream.eatWhile(/[\w\.\-:]/) && stream.eat(";");
+			}
+			return ok ? "atom" : "error";
+		} else {
+			stream.eatWhile(/[^&<]/);
+			return "text";
+		}
+	}
+
+	function inTag(stream, state) {
+		var ch = stream.next();
+		if (ch == ">" || (ch == "/" && stream.eat(">"))) {
+			state.tokenize = inText;
+			type = ch == ">" ? "endTag" : "selfcloseTag";
+			return "tag";
+		} else if (ch == "=") {
+			type = "equals";
+			return null;
+		} else if (/[\'\"]/.test(ch)) {
+			state.tokenize = inAttribute(ch);
+			return state.tokenize(stream, state);
+		} else {
+			stream.eatWhile(/[^\s\u00a0=<>\"\'\/?]/);
+			return "word";
+		}
+	}
+
+	function inAttribute(quote) {
+		return function(stream, state) {
+			while (!stream.eol()) {
+				if (stream.next() == quote) {
+					state.tokenize = inTag;
+					break;
+				}
+			}
+			return "string";
+		};
+	}
+
+	function inBlock(style, terminator) {
+		return function(stream, state) {
+			while (!stream.eol()) {
+				if (stream.match(terminator)) {
+					state.tokenize = inText;
+					break;
+				}
+				stream.next();
+			}
+			return style;
+		};
+	}
+	
+	function doctype(depth) {
+		return function(stream, state) {
+			var ch;
+			while ((ch = stream.next()) !== null) {
+				if (ch == "<") {
+					state.tokenize = doctype(depth + 1);
+					return state.tokenize(stream, state);
+				} else if (ch == ">") {
+					if (depth == 1) {
+						state.tokenize = inText;
+						break;
+					} else {
+						state.tokenize = doctype(depth - 1);
+						return state.tokenize(stream, state);
+					}
+				}
+			}
+			return "meta";
+		};
+	}
+
+	var curState = null, setStyle;
+	function pass() {
+		for (var i = arguments.length - 1; i >= 0; i--)
+			curState.cc.push(arguments[i]);
+	}
+	
+	function cont() {
+		pass.apply(null, arguments);
+		return true;
+	}
+
+	function pushContext(tagName, startOfLine) {
+		var noIndent = Kludges.doNotIndent.hasOwnProperty(tagName) 
+			|| (curState.context && curState.context.noIndent);
+		curState.context = {
+			prev : curState.context,
+			tagName : tagName,
+			indent : curState.indented,
+			startOfLine : startOfLine,
+			noIndent : noIndent
+		};
+	}
+	
+	function popContext() {
+		if (curState.context)
+			curState.context = curState.context.prev;
+	}
+
+	function element(type) {
+		if (type == "openTag") {
+			curState.tagName = tagName;
+			return cont(attributes, endtag(curState.startOfLine));
+		} else if (type == "closeTag") {
+			var err = false;
+			if (curState.context) {
+				if (curState.context.tagName != tagName) {
+					if (Kludges.implicitlyClosed.hasOwnProperty(curState.context.tagName.toLowerCase())) {
+						popContext();
+					}
+					err = !curState.context || curState.context.tagName != tagName;
+				}
+			} else {
+				err = true;
+			}
+			
+			if (err)
+				setStyle = "error";
+			return cont(endclosetag(err));
+		}
+		return cont();
+	}
+	
+	function endtag(startOfLine) {
+		return function(type) {
+			if (type == "selfcloseTag"
+					|| (type == "endTag" && Kludges.autoSelfClosers
+							.hasOwnProperty(curState.tagName
+									.toLowerCase()))) {
+				maybePopContext(curState.tagName.toLowerCase());
+				return cont();
+			}
+			if (type == "endTag") {
+				maybePopContext(curState.tagName.toLowerCase());
+				pushContext(curState.tagName, startOfLine);
+				return cont();
+			}
+			return cont();
+		};
+	}
+	
+	function endclosetag(err) {
+		return function(type) {
+			if (err)
+				setStyle = "error";
+			if (type == "endTag") {
+				popContext();
+				return cont();
+			}
+			setStyle = "error";
+			return cont(arguments.callee);
+		};
+	}
+	
+	function maybePopContext(nextTagName) {
+		var parentTagName;
+		while (true) {
+			if (!curState.context) {
+				return;
+			}
+			parentTagName = curState.context.tagName.toLowerCase();
+			if (!Kludges.contextGrabbers.hasOwnProperty(parentTagName)
+					|| !Kludges.contextGrabbers[parentTagName].hasOwnProperty(nextTagName)) {
+				return;
+			}
+			popContext();
+		}
+	}
+
+	function attributes(type) {
+		if (type == "word") {
+			setStyle = "attribute";
+			return cont(attribute, attributes);
+		}
+		if (type == "endTag" || type == "selfcloseTag")
+			return pass();
+		setStyle = "error";
+		return cont(attributes);
+	}
+	
+	function attribute(type) {
+		if (type == "equals")
+			return cont(attvalue, attributes);
+		if (!Kludges.allowMissing)
+			setStyle = "error";
+		return (type == "endTag" || type == "selfcloseTag") ? pass()
+				: cont();
+	}
+	
+	function attvalue(type) {
+		if (type == "string")
+			return cont(attvaluemaybe);
+		if (type == "word" && Kludges.allowUnquoted) {
+			setStyle = "string";
+			return cont();
+		}
+		setStyle = "error";
+		return (type == "endTag" || type == "selfCloseTag") ? pass()
+				: cont();
+	}
+	
+	function attvaluemaybe(type) {
+		if (type == "string")
+			return cont(attvaluemaybe);
+		else
+			return pass();
+	}
+	
+	function startState() {
+		return {
+			tokenize : inText,
+			cc : [],
+			indented : 0,
+			startOfLine : true,
+			tagName : null,
+			context : null
+		};
+	}
+	
+	function token(stream, state) {
+		if (stream.sol()) {
+			state.startOfLine = true;
+			state.indented = 0;
+		}
+		
+		if (stream.eatSpace())
+			return null;
+
+		setStyle = type = tagName = null;
+		var style = state.tokenize(stream, state);
+		state.type = type;
+		if ((style || type) && style != "comment") {
+			curState = state;
+			while (true) {
+				var comb = state.cc.pop() || element;
+				if (comb(type || style))
+					break;
+			}
+		}
+		state.startOfLine = false;
+		return setStyle || style;
+	}
+
+	return {
+		/**
+		 * @memberOf emmet.xmlParser
+		 * @returns
+		 */
+		parse: function(data, offset) {
+			offset = offset || 0;
+			var state = startState();
+			var stream = stringStream.create(data);
+			var tokens = [];
+			while (!stream.eol()) {
+				tokens.push({
+					type: token(stream, state),
+					start: stream.start + offset,
+					end: stream.pos + offset
+				});
+				stream.start = stream.pos;
+			}
+			
+			return tokens;
+		}		
+	};
+});
+
+/**
+ * XML EditTree is a module that can parse an XML/HTML element into a tree with 
+ * convenient methods for adding, modifying and removing attributes. These 
+ * changes can be written back to string with respect of code formatting.
+ * 
+ * @memberOf __xmlEditTreeDefine
+ * @constructor
+ * @param {Function} require
+ * @param {Underscore} _ 
+ */
+if (typeof module === 'object' && typeof define !== 'function') {
+	var define = function (factory) {
+		module.exports = factory(require, exports, module);
+	};
+}
+
+define('emmet/editTree/xml',['require','exports','module','lodash','./base','../parser/xml','../assets/range','../utils/common'],function(require, exports, module) {
+	var _ = require('lodash');
+	var editTree = require('./base');
+	var xmlParser = require('../parser/xml');
+	var range = require('../assets/range');
+	var utils = require('../utils/common');
+
+	var defaultOptions = {
+		styleBefore: ' ',
+		styleSeparator: '=',
+		styleQuote: '"',
+		offset: 0
+	};
+	
+	var startTag = /^<([\w\:\-]+)((?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*)\s*(\/?)>/m;
+	
+	var XMLEditContainer = editTree.EditContainer.extend({
+		initialize: function(source, options) {
+			_.defaults(this.options, defaultOptions);
+			this._positions.name = 1;
+			
+			var attrToken = null;
+			var tokens = xmlParser.parse(source);
+			
+			_.each(tokens, function(token) {
+				token.value = range.create(token).substring(source);
+				switch (token.type) {
+					case 'tag':
+						if (/^<[^\/]+/.test(token.value)) {
+							this._name = token.value.substring(1);
+						}
+						break;
+						
+					case 'attribute':
+						// add empty attribute
+						if (attrToken) {
+							this._children.push(new XMLEditElement(this, attrToken));
+						}
+						
+						attrToken = token;
+						break;
+						
+					case 'string':
+						this._children.push(new XMLEditElement(this, attrToken, token));
+						attrToken = null;
+						break;
+				}
+			}, this);
+			
+			if (attrToken) {
+				this._children.push(new XMLEditElement(this, attrToken));
+			}
+			
+			this._saveStyle();
+		},
+		
+		/**
+		 * Remembers all styles of properties
+		 * @private
+		 */
+		_saveStyle: function() {
+			var start = this.nameRange().end;
+			var source = this.source;
+			
+			_.each(this.list(), /** @param {EditElement} p */ function(p) {
+				p.styleBefore = source.substring(start, p.namePosition());
+				
+				if (p.valuePosition() !== -1) {
+					p.styleSeparator = source.substring(p.namePosition() + p.name().length, p.valuePosition() - p.styleQuote.length);
+				}
+				
+				start = p.range().end;
+			});
+		},
+		
+		/**
+		 * Adds new attribute 
+		 * @param {String} name Property name
+		 * @param {String} value Property value
+		 * @param {Number} pos Position at which to insert new property. By 
+		 * default the property is inserted at the end of rule 
+		 */
+		add: function(name, value, pos) {
+			var list = this.list();
+			var start = this.nameRange().end;
+			var styles = _.pick(this.options, 'styleBefore', 'styleSeparator', 'styleQuote');
+			
+			if (_.isUndefined(pos))
+				pos = list.length;
+			
+			
+			/** @type XMLEditAttribute */
+			var donor = list[pos];
+			if (donor) {
+				start = donor.fullRange().start;
+			} else if ((donor = list[pos - 1])) {
+				start = donor.range().end;
+			}
+			
+			if (donor) {
+				styles = _.pick(donor, 'styleBefore', 'styleSeparator', 'styleQuote');
+			}
+			
+			value = styles.styleQuote + value + styles.styleQuote;
+			
+			var attribute = new XMLEditElement(this, 
+					editTree.createToken(start + styles.styleBefore.length, name),
+					editTree.createToken(start + styles.styleBefore.length + name.length 
+							+ styles.styleSeparator.length, value)
+					);
+			
+			_.extend(attribute, styles);
+			
+			// write new attribute into the source
+			this._updateSource(attribute.styleBefore + attribute.toString(), start);
+			
+			// insert new attribute
+			this._children.splice(pos, 0, attribute);
+			return attribute;
+		},
+
+		/**
+		 * A special case of attribute editing: adds class value to existing
+		 * `class` attribute
+		 * @param {String} value
+		 */
+		addClass: function(value) {
+			var attr = this.get('class');
+			value = utils.trim(value);
+			if (!attr) {
+				return this.add('class', value);
+			}
+
+			var classVal = attr.value();
+			var classList = ' ' + classVal.replace(/\n/g, ' ') + ' ';
+			if (!~classList.indexOf(' ' + value + ' ')) {
+				attr.value(classVal + ' ' + value);
+			}
+		},
+
+		/**
+		 * A special case of attribute editing: removes class value from existing
+		 * `class` attribute
+		 * @param {String} value
+		 */
+		removeClass: function(value) {
+			var attr = this.get('class');
+			value = utils.trim(value);
+			if (!attr) {
+				return;
+			}
+
+			var reClass = new RegExp('(^|\\s+)' + utils.escapeForRegexp(value));
+			var classVal = attr.value().replace(reClass, '');
+			if (!utils.trim(classVal)) {
+				this.remove('class');
+			} else {
+				attr.value(classVal);
+			}
+		}
+	});
+	
+	var XMLEditElement = editTree.EditElement.extend({
+		initialize: function(parent, nameToken, valueToken) {
+			this.styleBefore = parent.options.styleBefore;
+			this.styleSeparator = parent.options.styleSeparator;
+			
+			var value = '', quote = parent.options.styleQuote;
+			if (valueToken) {
+				value = valueToken.value;
+				quote = value.charAt(0);
+				if (quote == '"' || quote == "'") {
+					value = value.substring(1);
+				} else {
+					quote = '';
+				}
+				
+				if (quote && value.charAt(value.length - 1) == quote) {
+					value = value.substring(0, value.length - 1);
+				}
+			}
+			
+			this.styleQuote = quote;
+			
+			this._value = value;
+			this._positions.value = valueToken ? valueToken.start + quote.length : -1;
+		},
+		
+		/**
+		 * Returns full rule range, with indentation
+		 * @param {Boolean} isAbsolute Return absolute range (with respect of
+		 * rule offset)
+		 * @returns {Range}
+		 */
+		fullRange: function(isAbsolute) {
+			var r = this.range(isAbsolute);
+			r.start -= this.styleBefore.length;
+			return r;
+		},
+		
+		valueOf: function() {
+			return this.name() + this.styleSeparator
+				+ this.styleQuote + this.value() + this.styleQuote;
+		}
+	});
+	
+	return {
+		/**
+		 * Parses HTML element into editable tree
+		 * @param {String} source
+		 * @param {Object} options
+		 * @memberOf emmet.htmlEditTree
+		 * @returns {EditContainer}
+		 */
+		parse: function(source, options) {
+			return new XMLEditContainer(source, options);
+		},
+		
+		/**
+		 * Extract and parse HTML from specified position in <code>content</code> 
+		 * @param {String} content CSS source code
+		 * @param {Number} pos Character position where to start source code extraction
+		 * @returns {XMLEditElement}
+		 */
+		parseFromPosition: function(content, pos, isBackward) {
+			var bounds = this.extractTag(content, pos, isBackward);
+			if (!bounds || !bounds.inside(pos))
+				// no matching HTML tag or caret outside tag bounds
+				return null;
+			
+			return this.parse(bounds.substring(content), {
+				offset: bounds.start
+			});
+		},
+		
+		/**
+		 * Extracts nearest HTML tag range from <code>content</code>, starting at 
+		 * <code>pos</code> position
+		 * @param {String} content
+		 * @param {Number} pos
+		 * @param {Boolean} isBackward
+		 * @returns {Range}
+		 */
+		extractTag: function(content, pos, isBackward) {
+			var len = content.length, i;
+			
+			// max extraction length. I don't think there may be tags larger 
+			// than 2000 characters length
+			var maxLen = Math.min(2000, len);
+			
+			/** @type Range */
+			var r = null;
+			
+			var match = function(pos) {
+				var m;
+				if (content.charAt(pos) == '<' && (m = content.substr(pos, maxLen).match(startTag)))
+					return range.create(pos, m[0]);
+			};
+			
+			// lookup backward, in case we are inside tag already
+			for (i = pos; i >= 0; i--) {
+				if ((r = match(i))) break;
+			}
+			
+			if (r && (r.inside(pos) || isBackward))
+				return r;
+			
+			if (!r && isBackward)
+				return null;
+			
+			// search forward
+			for (i = pos; i < len; i++) {
+				if ((r = match(i)))
+					return r;
+			}
+		}
+	};
+});
+if (typeof module === 'object' && typeof define !== 'function') {
+	var define = function (factory) {
+		module.exports = factory(require, exports, module);
+	};
+}
+
+define('emmet/utils/cssSections',['require','exports','module','lodash','./common','./comments','../assets/range','../assets/stringStream','../parser/css','../assets/htmlMatcher','../editTree/xml'],function(require, exports, module) {
+	var _ = require('lodash');
+	var utils = require('./common');
+	var commentsUtils = require('./comments');
+	var range = require('../assets/range');
+	var stringStream = require('../assets/stringStream');
+	var cssParser = require('../parser/css');
+	var htmlMatcher = require('../assets/htmlMatcher');
+	var xmlEditTree = require('../editTree/xml');
+
+	var idCounter = 1;
+	var maxId = 1000000;
+
+	var reSpaceTrim = /^(\s*).+?(\s*)$/;
+	var reSpace = /\s/g;
+	var reComma = /,/;
+
+	function isQuote(ch) {
+		return ch == '"' || ch == "'";
+	}
+
+	function getId() {
+		idCounter = (idCounter + 1) % maxId;
+		return 's' + idCounter;
+	}
+
+	/**
+	 * @param {Range} range Full selector range with additional
+	 * properties for matching name and content (@see findAllRules())
+	 * @param {String} source CSS source
+	 */
+	function CSSSection(rng, source) {
+		this.id = getId();
+		/** @type {CSSSection} */
+		this.parent = null;
+		/** @type {CSSSection} */
+		this.nextSibling = null;
+		/** @type {CSSSection} */
+		this.previousSibling = null;
+		this._source = source;
+		this._name = null;
+		this._content = null;
+
+		/**
+		 * Custom data for current nodes, used by other modules for
+		 * caching etc.
+		 * @type {Object}
+		 */
+		this._data = {};
+
+		if (!rng && source) {
+			rng = range(0, source);
+		}
+
+		this.range = rng;
+		this.children = [];
+	}
+
+	CSSSection.prototype = {
+		addChild: function(section) {
+			if (!(section instanceof CSSSection)) {
+				section = new CSSSection(section);
+			}
+
+			var lastChild = _.last(this.children);
+			if (lastChild) {
+				lastChild.nextSibling = section;
+				section.previousSibling = lastChild;
+			}
+			section.parent = this;
+
+			this.children.push(section);
+			return section;
+		},
+
+		/**
+		 * Returns root node
+		 * @return {CSSSection}
+		 */
+		root: function() {
+			var root = this;
+			do {
+				if (!root.parent) {
+					return root;
+				}
+			} while(root = root.parent);
+
+			return root;
+		},
+
+		/**
+		 * Returns currect CSS source
+		 * @return {String}
+		 */
+		source: function() {
+			return this._source || this.root()._source;
+		},
+
+		/**
+		 * Returns section name
+		 * @return {String}
+		 */
+		name: function() {
+			if (this._name === null) {
+				var range = this.nameRange();
+				if (range) {
+					this._name = range.substring(this.source());
+				}
+			}
+
+			return this._name;
+		},
+
+		/**
+		 * Returns section name range
+		 * @return {[type]} [description]
+		 */
+		nameRange: function() {
+			if (this.range && '_selectorEnd' in this.range) {
+				return range.create2(this.range.start, this.range._selectorEnd);
+			}
+		},
+
+		/**
+		 * Returns deepest child of current section (or section itself) 
+		 * which includes given position.
+		 * @param  {Number} pos
+		 * @return {CSSSection}
+		 */
+		matchDeep: function(pos) {
+			if (!this.range.inside(pos)) {
+				return null;
+			}
+
+			for (var i = 0, il = this.children.length, m; i < il; i++) {
+				m = this.children[i].matchDeep(pos);
+				if (m) {
+					return m;
+				}
+			};
+
+			return this.parent ? this : null;
+		},
+
+		/**
+		 * Returns current and all nested sections ranges
+		 * @return {Array}
+		 */
+		allRanges: function() {
+			var out = [];
+			if (this.parent) {
+				// add current range if it is not root node
+				out.push(this.range);
+			}
+
+			_.each(this.children, function(child) {
+				out = out.concat(child.allRanges());
+			});
+
+			return out;
+		},
+
+		data: function(key, value) {
+			if (typeof value !== 'undefined') {
+				this._data[key] = value;
+			}
+
+			return this._data[key];
+		},
+
+		stringify: function(indent) {
+			indent = indent || '';
+			var out = '';
+			_.each(this.children, function(item) {
+				out += indent + item.name().replace(/\n/g, '\\n') + '\n';
+				out += item.stringify(indent + '--');
+			});
+
+			return out;
+		},
+
+		/**
+		 * Returns current section’s actual content,
+		 * e.g. content without nested sections
+		 * @return {String} 
+		 */
+		content: function() {
+			if (this._content !== null) {
+				return this._content;
+			}
+
+			if (!this.range || !('_contentStart' in this.range)) {
+				return '';
+			}
+
+			var r = range.create2(this.range._contentStart + 1, this.range.end - 1);
+			var source = this.source();
+			var start = r.start;
+			var out = '';
+
+			_.each(this.children, function(child) {
+				out += source.substring(start, child.range.start);
+				start = child.range.end;
+			});
+
+			out += source.substring(start, r.end);
+			return this._content = utils.trim(out);
+		}
+	};
+
+	return {
+		/**
+		 * Finds all CSS rules‘ ranges in given CSS source
+		 * @param  {String} content CSS source
+		 * @return {Array} Array of ranges
+		 */
+		findAllRules: function(content) {
+			content = this.sanitize(content);
+			var stream = stringStream(content);
+			var ranges = [], matchedRanges;
+
+			var saveRule = _.bind(function(r) {
+				var selRange = this.extractSelector(content, r.start);
+				var rule = range.create2(selRange.start, r.end);
+				rule._selectorEnd = selRange.end;
+				rule._contentStart = r.start;
+				ranges.push(rule);
+			}, this);
+
+			var ch;
+			while (ch = stream.next()) {
+				if (isQuote(ch)) {
+					if (!stream.skipString(ch)) {
+						break; // unterminated string
+					}
+
+					continue;
+				}
+
+				if (ch == '{') {
+					matchedRanges = this.matchBracesRanges(content, stream.pos - 1);
+					_.each(matchedRanges, saveRule);
+
+					if (matchedRanges.length) {
+						stream.pos = _.last(matchedRanges).end;
+						continue;
+					} 
+				}
+			}
+			
+			return ranges.sort(function(a, b) {
+				return a.start - b.start;
+			});
+		},
+
+		/**
+		 * Matches curly braces content right after given position
+		 * @param  {String} content CSS content. Must not contain comments!
+		 * @param  {Number} pos     Search start position
+		 * @return {Range}
+		 */
+		matchBracesRanges: function(content, pos, sanitize) {
+			if (sanitize) {
+				content = this.sanitize(content);
+			}
+
+			var stream = stringStream(content);
+			stream.start = stream.pos = pos;
+			var stack = [], ranges = [];
+			var ch;
+			while (ch = stream.next()) {
+				if (ch == '{') {
+					stack.push(stream.pos - 1);
+				} else if (ch == '}') {
+					if (!stack.length) {
+						throw 'Invalid source structure (check for curly braces)';
+					}
+					ranges.push(range.create2(stack.pop(), stream.pos));
+					if (!stack.length) {
+						return ranges;
+					}
+				} else {
+					stream.skipQuoted();
+				}
+			}
+
+			return ranges;
+		},
+
+		/**
+		 * Extracts CSS selector from CSS document from
+		 * given position. The selector is located by moving backward
+		 * from given position which means that passed position
+		 * must point to the end of selector 
+		 * @param  {String}  content CSS source
+		 * @param  {Number}  pos     Search position
+		 * @param  {Boolean} sanitize Sanitize CSS source before processing.
+		 * Off by default and assumes that CSS must be comment-free already
+		 * (for performance)
+		 * @return {Range}
+		 */
+		extractSelector: function(content, pos, sanitize) {
+			if (sanitize) {
+				content = this.sanitize(content);
+			}
+
+			var skipString = function() {
+				var quote = content.charAt(pos);
+				if (quote == '"' || quote == "'") {
+					while (--pos >= 0) {
+						if (content.charAt(pos) == quote && content.charAt(pos - 1) != '\\') {
+							break;
+						}
+					}
+					return true;
+				}
+
+				return false;
+			};
+
+			// find CSS selector
+			var ch;
+			var endPos = pos;
+			while (--pos >= 0) {
+				if (skipString()) continue;
+
+				ch = content.charAt(pos);
+				if (ch == ')') {
+					// looks like it’s a preprocessor thing,
+					// most likely a mixin arguments list, e.g.
+					// .mixin (@arg1; @arg2) {...}
+					while (--pos >= 0) {
+						if (skipString()) continue;
+
+						if (content.charAt(pos) == '(') {
+							break;
+						}
+					}
+					continue;
+				}
+
+				if (ch == '{' || ch == '}' || ch == ';') {
+					pos++;
+					break;
+				}
+			}
+
+			if (pos < 0) {
+				pos = 0;
+			}
+			
+			var selector = content.substring(pos, endPos);
+
+			// trim whitespace from matched selector
+			var m = selector.replace(reSpace, ' ').match(reSpaceTrim);
+			if (m) {
+				pos += m[1].length;
+				endPos -= m[2].length;
+			}
+
+			return range.create2(pos, endPos);
+		},
+
+		/**
+		 * Search for nearest CSS rule/section that contains
+		 * given position
+		 * @param  {String} content CSS content or matched CSS rules (array of ranges)
+		 * @param  {Number} pos     Search position
+		 * @return {Range}
+		 */
+		matchEnclosingRule: function(content, pos) {
+			if (_.isString(content)) {
+				content = this.findAllRules(content);
+			}
+
+			var rules = _.filter(content, function(r) {
+				return r.inside(pos);
+			});
+
+			return _.last(rules);
+		},
+
+		/**
+		 * Locates CSS rule next or before given position
+		 * @param  {String}  content    CSS content
+		 * @param  {Number}  pos        Search start position
+		 * @param  {Boolean} isBackward Search backward (find previous rule insteaf of next one)
+		 * @return {Range}
+		 */
+		locateRule: function(content, pos, isBackward) {
+			// possible case: editor reported that current syntax is
+			// CSS, but it’s actually a HTML document (either `style` tag or attribute)
+			var offset = 0;
+			var subrange = this.styleTagRange(content, pos);
+			if (subrange) {
+				offset = subrange.start;
+				pos -= subrange.start;
+				content = subrange.substring(content);
+			}
+
+			var rules = this.findAllRules(content);
+			var ctxRule = this.matchEnclosingRule(rules, pos);
+
+			if (ctxRule) {
+				return ctxRule.shift(offset);
+			}
+
+			for (var i = 0, il = rules.length; i < il; i++) {
+				if (rules[i].start > pos) {
+					return rules[isBackward ? i - 1 : i].shift(offset);
+				}
+			}
+		},
+
+		/**
+		 * Sanitizes given CSS content: replaces content that may 
+		 * interfere with parsing (comments, interpolations, etc.)
+		 * with spaces. Sanitized content MUST NOT be used for
+		 * editing or outputting, it just simplifies searching
+		 * @param  {String} content CSS content
+		 * @return {String}
+		 */
+		sanitize: function(content) {
+			content = commentsUtils.strip(content);
+
+			// remove preprocessor string interpolations like #{var}
+			var stream = stringStream(content);
+			var replaceRanges = [];
+			var ch, ch2;
+
+			while ((ch = stream.next())) {
+				if (isQuote(ch)) {
+					// skip string
+					stream.skipString(ch)
+					continue;
+				} else if (ch === '#' || ch === '@') {
+					ch2 = stream.peek();
+					if (ch2 === '{') { // string interpolation
+						stream.start = stream.pos - 1;
+
+						if (stream.skipTo('}')) {
+							stream.pos += 1;
+						} else {
+							throw 'Invalid string interpolation at ' + stream.start;
+						}
+
+						replaceRanges.push([stream.start, stream.pos]);
+					}
+				}
+			}
+
+			return utils.replaceWith(content, replaceRanges, 'a');
+		},
+
+		/**
+		 * Parses and returns all sections in given CSS
+		 * as tree-like structure, e.g. provides nesting
+		 * info
+		 * @param  {String} content CSS content
+		 * @return {CSSSection}
+		 */
+		sectionTree: function(content) {
+			var root = new CSSSection(null, content);
+			var rules = this.findAllRules(content);
+
+			// rules are sorted in order they appear in CSS source
+			// so we can optimize their nesting routine
+			var insert = function(range, ctx) {
+				while (ctx && ctx.range) {
+					if (ctx.range.contains(range)) {
+						return ctx.addChild(range);
+					}
+
+					ctx = ctx.parent;
+				}
+
+				// if we are here then given range is a top-level section
+				return root.addChild(range);
+			};
+
+			var ctx = root;
+			_.each(rules, function(r) {
+				ctx = insert(r, ctx);
+			});
+
+			return root;
+		},
+
+		/**
+		 * Returns ranges for all nested sections, available in
+		 * given CSS rule
+		 * @param  {CSSEditContainer} rule
+		 * @return {Array}
+		 */
+		nestedSectionsInRule: function(rule) {
+			var offset = rule.valueRange(true).start;
+			var nestedSections = this.findAllRules(rule.valueRange().substring(rule.source));
+			_.each(nestedSections, function(section) {
+				section.start += offset;
+				section.end += offset;
+				section._selectorEnd += offset;
+				section._contentStart += offset;
+			});
+			return nestedSections;
+		},
+
+		styleTagRange: function(content, pos) {
+			var tag = htmlMatcher.tag(content, pos);
+			return tag && tag.open.name.toLowerCase() == 'style' 
+				&& tag.innerRange.cmp(pos, 'lte', 'gte')
+				&& tag.innerRange;
+		},
+
+		styleAttrRange: function(content, pos) {
+			var tree = xmlEditTree.parseFromPosition(content, pos, true);
+			if (tree) {
+				var attr = tree.itemFromPosition(pos, true);
+				return attr && attr.name().toLowerCase() == 'style' 
+					&& attr.valueRange(true).cmp(pos, 'lte', 'gte')
+					&& attr.valueRange(true);
+			}
+		},
+
+		CSSSection: CSSSection
+	};
 });
 /**
  * Utility module that provides ordered storage of function handlers. 
@@ -8884,16 +11165,38 @@ define('emmet/assets/caniuse',['require','exports','module','lodash','./preferen
 	/**
 	 * Parses raw Can I Use database for better lookups
 	 * @param  {String} data Raw database
+	 * @param  {Boolean} optimized Pass `true` if given `data` is already optimized
 	 * @return {Object}
 	 */
-	function parseDB(data) {
+	function parseDB(data, optimized) {
 		if (typeof data == 'string') {
 			data = JSON.parse(data);
 		}
 
-		vendorsDB = parseVendors(data);
-		cssDB = parseCSS(data);
-		erasDB = parseEra(data);
+		if (!optimized) {
+			data = optimize(data);
+		}
+
+		vendorsDB = data.vendors;
+		cssDB = data.css;
+		erasDB = data.era;
+	}
+
+	/**
+	 * Extract required data only from CIU database 
+	 * @param  {Object} data Raw Can I Use database
+	 * @return {Object}      Optimized database
+	 */
+	function optimize(data) {
+		if (typeof data == 'string') {
+			data = JSON.parse(data);
+		}
+
+		return {
+			vendors: parseVendors(data),
+			css: parseCSS(data),
+			era: parseEra(data)
+		};
 	}
 
 	/**
@@ -8991,6 +11294,8 @@ define('emmet/assets/caniuse',['require','exports','module','lodash','./preferen
 
 	return {
 		load: parseDB,
+		optimize: optimize,
+		
 		/**
 		 * Resolves prefixes for given property
 		 * @param {String} property A property to resolve. It can start with `@` symbol
@@ -9029,114 +11334,10 @@ define('emmet/assets/caniuse',['require','exports','module','lodash','./preferen
 		}
 	};
 });
-if (typeof module === 'object' && typeof define !== 'function') {
-	var define = function (factory) {
-		module.exports = factory(require, exports, module);
-	};
-}
-
-define('emmet/vendor/klass',['require','exports','module','lodash'],function(require, exports, module) {
-	var _ = require('lodash');
-
-	/**
-	 * Shared empty constructor function to aid in prototype-chain creation.
-	 */
-	var ctor = function(){};
-
-	/**
-	 * Helper function to correctly set up the prototype chain, for subclasses.
-	 * Similar to `goog.inherits`, but uses a hash of prototype properties and
-	 * class properties to be extended.
-	 * Took it from Backbone.
-	 * @param {Object} parent
-	 * @param {Object} protoProps
-	 * @param {Object} staticProps
-	 * @returns {Object}
-	 */
-	function inherits(parent, protoProps, staticProps) {
-		var child;
-
-		// The constructor function for the new subclass is either defined by
-		// you (the "constructor" property in your `extend` definition), or
-		// defaulted by us to simply call the parent's constructor.
-		if (protoProps && protoProps.hasOwnProperty('constructor')) {
-			child = protoProps.constructor;
-		} else {
-			child = function() {
-				parent.apply(this, arguments);
-			};
-		}
-
-		// Inherit class (static) properties from parent.
-		_.extend(child, parent);
-
-		// Set the prototype chain to inherit from `parent`, without calling
-		// `parent`'s constructor function.
-		ctor.prototype = parent.prototype;
-		child.prototype = new ctor();
-
-		// Add prototype properties (instance properties) to the subclass,
-		// if supplied.
-		if (protoProps)
-			_.extend(child.prototype, protoProps);
-
-		// Add static properties to the constructor function, if supplied.
-		if (staticProps)
-			_.extend(child, staticProps);
-
-		// Correctly set child's `prototype.constructor`.
-		child.prototype.constructor = child;
-
-		// Set a convenience property in case the parent's prototype is needed
-		// later.
-		child.__super__ = parent.prototype;
-
-		return child;
-	}
-
-	return {
-		/**
-		 * The self-propagating extend function for classes.
-		 * Took it from Backbone 
-		 * @param {Object} protoProps
-		 * @param {Object} classProps
-		 * @returns {Object}
-		 */
-		extend: function(protoProps, classProps) {
-			var child = inherits(this, protoProps, classProps);
-			child.extend = this.extend;
-			// a hack required to WSH inherit `toString` method
-			if (protoProps.hasOwnProperty('toString'))
-				child.prototype.toString = protoProps.toString;
-			return child;
-		}
-	};
-});
 /**
- * Abstract implementation of edit tree interface.
- * Edit tree is a named container of editable “name-value” child elements, 
- * parsed from <code>source</code>. This container provides convenient methods
- * for editing/adding/removing child elements. All these update actions are
- * instantly reflected in the <code>source</code> code with respect of formatting.
- * <br><br>
- * For example, developer can create an edit tree from CSS rule and add or 
- * remove properties from it–all changes will be immediately reflected in the 
- * original source.
- * <br><br>
- * All classes defined in this module should be extended the same way as in
- * Backbone framework: using <code>extend</code> method to create new class and 
- * <code>initialize</code> method to define custom class constructor.
- * 
- * @example
- * <pre><code>
- * var MyClass = require('editTree/base').EditElement.extend({
- *     initialize: function() {
- *     // constructor code here
- *   }
- * });
- * 
- * var elem = new MyClass(); 
- * </code></pre>
+ * A very simple, ERB-style templating. Basically, just as string substitution.
+ * The reason to not use default Lo-dash’es `_.template()` implementation
+ * is because it fails to run in CSP-enabled environments (Chrome extension, Atom)
  */
 if (typeof module === 'object' && typeof define !== 'function') {
 	var define = function (factory) {
@@ -9144,1458 +11345,92 @@ if (typeof module === 'object' && typeof define !== 'function') {
 	};
 }
 
-define('emmet/editTree/base',['require','exports','module','lodash','../assets/range','../utils/common','../vendor/klass'],function(require, exports, module) {
+define('emmet/utils/template',['require','exports','module','lodash','../assets/stringStream','./common'],function(require, exports, module) {
 	var _ = require('lodash');
-	var range = require('../assets/range');
-	var utils = require('../utils/common');
-	var klass = require('../vendor/klass');
-	
-	/**
-	 * Named container of edited source
-	 * @type EditContainer
-	 * @param {String} source
-	 * @param {Object} options
-	 */
-	function EditContainer(source, options) {
-		this.options = _.extend({offset: 0}, options);
-		/**
-		 * Source code of edited structure. All changes in the structure are 
-		 * immediately reflected into this property
-		 */
-		this.source = source;
-		
-		/** 
-		 * List of all editable children
-		 * @private 
-		 */
-		this._children = [];
-		
-		/**
-		 * Hash of all positions of container
-		 * @private
-		 */
-		this._positions = {
-			name: 0
+	var stringStream = require('../assets/stringStream');
+	var utils = require('./common');
+
+	function parseArgs(str) {
+		var args = [];
+		var stream = stringStream(str);
+
+		while (!stream.eol()) {
+			if (stream.peek() == ',') {
+				args.push(utils.trim(stream.current()));
+				stream.next();
+				stream.start = stream.pos;
+			}
+			stream.next();
+		}
+
+		args.push(utils.trim(stream.current()));
+		return _.compact(args);
+	}
+
+	function parseFunctionCall(str) {
+		var fnName = null, args;
+		var stream = stringStream(str);
+		while (!stream.eol()) {
+			if (stream.peek() == '(') {
+				fnName = stream.current();
+				stream.start = stream.pos;
+				stream.skipToPair('(', ')', true);
+				args = stream.current();
+				args = parseArgs(args.substring(1, args.length - 1));
+				break;
+			}
+
+			stream.next();
+		}
+
+		return fnName && {
+			name: fnName,
+			args: args
 		};
-		
-		this.initialize.apply(this, arguments);
 	}
-	
-	/**
-	 * The self-propagating extend function for classes.
-	 * @type Function
-	 */
-	EditContainer.extend = klass.extend;
-	
-	EditContainer.prototype = {
-		type: 'container',
-		/**
-		 * Child class constructor
-		 */
-		initialize: function() {},
 
-		/**
-		 * Make position absolute
-		 * @private
-		 * @param {Number} num
-		 * @param {Boolean} isAbsolute
-		 * @returns {Boolean}
-		 */
-		_pos: function(num, isAbsolute) {
-			return num + (isAbsolute ? this.options.offset : 0);
-		},
-		
-		/**
-		 * Replace substring of tag's source
-		 * @param {String} value
-		 * @param {Number} start
-		 * @param {Number} end
-		 * @private
-		 */
-		_updateSource: function(value, start, end) {
-			// create modification range
-			var r = range.create(start, _.isUndefined(end) ? 0 : end - start);
-			var delta = value.length - r.length();
-			
-			var update = function(obj) {
-				_.each(obj, function(v, k) {
-					if (v >= r.end)
-						obj[k] += delta;
+	function evalArg(arg, context) {
+		if (/^['"]/.test(arg)) {
+			// plain string
+			return arg.replace(/^(['"])(.+?)\1$/, '$2');
+		}
+
+		if (!_.isNaN(+arg)) {
+			// a number
+			return +arg;
+		}
+
+		// otherwise, treat argument as a property name
+		if (arg) {
+			var parts = arg.split('.');
+			var prop = context;
+			while (parts.length) {
+				prop = prop[parts.shift()];
+			}
+
+			return prop;
+		}
+	}
+
+	function process(template, context) {
+		return template.replace(/<%[=\-](.+?)%>/g, function(str, match) {
+			match = utils.trim(match);
+			var fn = parseFunctionCall(match);
+			if (fn) {
+				var fnArgs = _.map(fn.args, function(arg) {
+					return evalArg(arg, context);
 				});
-			};
-			
-			// update affected positions of current container
-			update(this._positions);
-			
-			// update affected positions of children
-			var recursiveUpdate = function(items) {
-				_.each(items, function(item) {
-					update(item._positions);
-					if (item.type == 'container') {
-						recursiveUpdate(item.list());
-					}
-				});
-			};
-
-			recursiveUpdate(this.list());
-			this.source = utils.replaceSubstring(this.source, value, r);
-		},
-			
-			
-		/**
-		 * Adds new attribute 
-		 * @param {String} name Property name
-		 * @param {String} value Property value
-		 * @param {Number} pos Position at which to insert new property. By 
-		 * default the property is inserted at the end of rule 
-		 * @returns {EditElement} Newly created element
-		 */
-		add: function(name, value, pos) {
-			// this is abstract implementation
-			var item = new EditElement(name, value);
-			this._children.push(item);
-			return item;
-		},
-		
-		/**
-		 * Returns attribute object
-		 * @param {String} name Attribute name or its index
-		 * @returns {EditElement}
-		 */
-		get: function(name) {
-			if (_.isNumber(name))
-				return this.list()[name];
-			
-			if (_.isString(name))
-				return _.find(this.list(), function(prop) {
-					return prop.name() === name;
-				});
-			
-			return name;
-		},
-		
-		/**
-		 * Returns all children by name or indexes
-		 * @param {Object} name Element name(s) or indexes (<code>String</code>,
-		 * <code>Array</code>, <code>Number</code>)
-		 * @returns {Array}
-		 */
-		getAll: function(name) {
-			if (!_.isArray(name))
-				name = [name];
-			
-			// split names and indexes
-			var names = [], indexes = [];
-			_.each(name, function(item) {
-				if (_.isString(item))
-					names.push(item);
-				else if (_.isNumber(item))
-					indexes.push(item);
-			});
-			
-			return _.filter(this.list(), function(attribute, i) {
-				return _.include(indexes, i) || _.include(names, attribute.name());
-			});
-		},
-
-		/**
-		 * Returns list of all editable child elements
-		 * @returns {Array}
-		 */
-		list: function() {
-			return this._children;
-		},
-
-		/**
-		 * Remove child element
-		 * @param {String} name Property name or its index
-		 */
-		remove: function(name) {
-			var element = this.get(name);
-			if (element) {
-				this._updateSource('', element.fullRange());
-				this._children = _.without(this._children, element);
+				return context[fn.name].apply(context, fnArgs);
 			}
-		},
-		
-		/**
-		 * Returns index of editble child in list
-		 * @param {Object} item
-		 * @returns {Number}
-		 */
-		indexOf: function(item) {
-			return _.indexOf(this.list(), this.get(item));
-		},
-		
-		/**
-		 * Returns or updates element value. If such element doesn't exists,
-		 * it will be created automatically and added at the end of child list.
-		 * @param {String} name Element name or its index
-		 * @param {String} value New element value
-		 * @returns {String}
-		 */
-		value: function(name, value, pos) {
-			var element = this.get(name);
-			if (element)
-				return element.value(value);
-			
-			if (!_.isUndefined(value)) {
-				// no such element — create it
-				return this.add(name, value, pos);
-			}
-		},
-		
-		/**
-		 * Returns all values of child elements found by <code>getAll()</code>
-		 * method
-		 * @param {Object} name Element name(s) or indexes (<code>String</code>,
-		 * <code>Array</code>, <code>Number</code>)
-		 * @returns {Array}
-		 */
-		values: function(name) {
-			return _.map(this.getAll(name), function(element) {
-				return element.value();
-			});
-		},
-		
-		/**
-		 * Sets or gets container name
-		 * @param {String} val New name. If not passed, current 
-		 * name is returned
-		 * @return {String}
-		 */
-		name: function(val) {
-			if (!_.isUndefined(val) && this._name !== (val = String(val))) {
-				this._updateSource(val, this._positions.name, this._positions.name + this._name.length);
-				this._name = val;
-			}
-			
-			return this._name;
-		},
-		
-		/**
-		 * Returns name range object
-		 * @param {Boolean} isAbsolute Return absolute range (with respect of 
-		 * rule offset)
-		 * @returns {Range}
-		 */
-		nameRange: function(isAbsolute) {
-			return range.create(this._positions.name + (isAbsolute ? this.options.offset : 0), this.name());
-		},
 
-		/**
-		 * Returns range of current source
-		 * @param {Boolean} isAbsolute
-		 */
-		range: function(isAbsolute) {
-			return range.create(isAbsolute ? this.options.offset : 0, this.valueOf());
-		},
-		
-		/**
-		 * Returns element that belongs to specified position
-		 * @param {Number} pos
-		 * @param {Boolean} isAbsolute
-		 * @returns {EditElement}
-		 */
-		itemFromPosition: function(pos, isAbsolute) {
-			return _.find(this.list(), function(elem) {
-				return elem.range(isAbsolute).inside(pos);
-			});
-		},
-		
-		/**
-		 * Returns source code of current container 
-		 * @returns {String}
-		 */
-		toString: function() {
-			return this.valueOf();
-		},
-
-		valueOf: function() {
-			return this.source;
-		}
-	};
-	
-	/**
-	 * @param {EditContainer} parent
-	 * @param {Object} nameToken
-	 * @param {Object} valueToken
-	 */
-	function EditElement(parent, nameToken, valueToken) {
-		/** @type EditContainer */
-		this.parent = parent;
-		
-		this._name = nameToken.value;
-		this._value = valueToken ? valueToken.value : '';
-		
-		this._positions = {
-			name: nameToken.start,
-			value: valueToken ? valueToken.start : -1
-		};
-		
-		this.initialize.apply(this, arguments);
-	}
-	
-	/**
-	 * The self-propagating extend function for classes.
-	 * @type Function
-	 */
-	EditElement.extend = klass.extend;
-	
-	EditElement.prototype = {
-		type: 'element',
-
-		/**
-		 * Child class constructor
-		 */
-		initialize: function() {},
-		
-		/**
-		 * Make position absolute
-		 * @private
-		 * @param {Number} num
-		 * @param {Boolean} isAbsolute
-		 * @returns {Boolean}
-		 */
-		_pos: function(num, isAbsolute) {
-			return num + (isAbsolute ? this.parent.options.offset : 0);
-		},
-			
-		/**
-		 * Sets of gets element value
-		 * @param {String} val New element value. If not passed, current 
-		 * value is returned
-		 * @returns {String}
-		 */
-		value: function(val) {
-			if (!_.isUndefined(val) && this._value !== (val = String(val))) {
-				this.parent._updateSource(val, this.valueRange());
-				this._value = val;
-			}
-			
-			return this._value;
-		},
-		
-		/**
-		 * Sets of gets element name
-		 * @param {String} val New element name. If not passed, current 
-		 * name is returned
-		 * @returns {String}
-		 */
-		name: function(val) {
-			if (!_.isUndefined(val) && this._name !== (val = String(val))) {
-				this.parent._updateSource(val, this.nameRange());
-				this._name = val;
-			}
-			
-			return this._name;
-		},
-		
-		/**
-		 * Returns position of element name token
-		 * @param {Boolean} isAbsolute Return absolute position
-		 * @returns {Number}
-		 */
-		namePosition: function(isAbsolute) {
-			return this._pos(this._positions.name, isAbsolute);
-		},
-		
-		/**
-		 * Returns position of element value token
-		 * @param {Boolean} isAbsolute Return absolute position
-		 * @returns {Number}
-		 */
-		valuePosition: function(isAbsolute) {
-			return this._pos(this._positions.value, isAbsolute);
-		},
-		
-		/**
-		 * Returns element name
-		 * @param {Boolean} isAbsolute Return absolute range 
-		 * @returns {Range}
-		 */
-		range: function(isAbsolute) {
-			return range.create(this.namePosition(isAbsolute), this.valueOf());
-		},
-		
-		/**
-		 * Returns full element range, including possible indentation
-		 * @param {Boolean} isAbsolute Return absolute range
-		 * @returns {Range}
-		 */
-		fullRange: function(isAbsolute) {
-			return this.range(isAbsolute);
-		},
-		
-		/**
-		 * Returns element name range
-		 * @param {Boolean} isAbsolute Return absolute range
-		 * @returns {Range}
-		 */
-		nameRange: function(isAbsolute) {
-			return range.create(this.namePosition(isAbsolute), this.name());
-		},
-		
-		/**
-		 * Returns element value range
-		 * @param {Boolean} isAbsolute Return absolute range
-		 * @returns {Range}
-		 */
-		valueRange: function(isAbsolute) {
-			return range.create(this.valuePosition(isAbsolute), this.value());
-		},
-		
-		/**
-		 * Returns current element string representation
-		 * @returns {String}
-		 */
-		toString: function() {
-			return this.valueOf();
-		},
-		
-		valueOf: function() {
-			return this.name() + this.value();
-		}
-	};
-	
-	return {
-		EditContainer: EditContainer,
-		EditElement: EditElement,
-		
-		/**
-		 * Creates token that can be fed to <code>EditElement</code>
-		 * @param {Number} start
-		 * @param {String} value
-		 * @param {String} type
-		 * @returns
-		 */
-		createToken: function(start, value, type) {
-			var obj = {
-				start: start || 0,
-				value: value || '',
-				type: type
-			};
-			
-			obj.end = obj.start + obj.value.length;
-			return obj;
-		}
-	};
-});
-if (typeof module === 'object' && typeof define !== 'function') {
-	var define = function (factory) {
-		module.exports = factory(require, exports, module);
-	};
-}
-
-define('emmet/parser/css',['require','exports','module'],function(require, exports, module) {
-	var session = {tokens: null};
-	
-	// walks around the source
-	var walker = {
-		init: function (source) {
-			// this.source = source.replace(/\r\n?/g, '\n');
-			this.source = source;
-			this.ch = '';
-			this.chnum = -1;
-		
-			// advance
-			this.nextChar();
-		},
-		nextChar: function () {
-			return this.ch = this.source.charAt(++this.chnum);
-		},
-		peek: function() {
-			return this.source.charAt(this.chnum + 1);
-		}
-	};
-
-	// utility helpers
-	function isNameChar(c, cc) {
-		cc = cc || c.charCodeAt(0);
-		return (
-			(cc >= 97 && cc <= 122 /* a-z */) || 
-			(cc >= 65 && cc <= 90 /* A-Z */) || 
-			/* 
-			Experimental: include cyrillic ranges 
-			since some letters, similar to latin ones, can 
-			accidentally appear in CSS tokens
-			*/
-			(cc >= 1024 && cc <= 1279) || 
-			c === '&' || /* selector placeholder (LESS, SCSS) */
-			c === '_' || 
-			c === '<' || /* comparisons (LESS, SCSS) */
-			c === '>' || 
-			c === '=' || 
-			c === '-'
-		);
-	}
-
-	function isDigit(c, cc) {
-		cc = cc || c.charCodeAt(0);
-		return (cc >= 48 && cc <= 57);
-	}
-
-	var isOp = (function () {
-		var opsa = "{}[]()+*=.,;:>~|\\%$#@^!".split(''),
-			opsmatcha = "*^|$~".split(''),
-			ops = {},
-			opsmatch = {},
-			i = 0;
-		for (; i < opsa.length; i += 1) {
-			ops[opsa[i]] = true;
-		}
-		for (i = 0; i < opsmatcha.length; i += 1) {
-			opsmatch[opsmatcha[i]] = true;
-		}
-		return function (ch, matchattr) {
-			if (matchattr) {
-				return ch in opsmatch;
-			}
-			return ch in ops;
-		};
-	}());
-	
-	// creates token objects and pushes them to a list
-	function tokener(value, type) {
-		session.tokens.push({
-			value: value,
-			type:  type || value,
-			start: null,
-			end:   null
+			return evalArg(match, context);
 		});
 	}
 
-	function getPosInfo(w) {
-		var errPos = w.chnum;
-		var source = w.source.replace(/\r\n?/g, '\n');
-		var part = w.source.substring(0, errPos + 1).replace(/\r\n?/g, '\n');
-		var lines = part.split('\n');
-		var ch = (lines[lines.length - 1] || '').length;
-		var fullLine = source.split('\n')[lines.length - 1] || '';
-		
-		var chunkSize = 100;
-		var offset = Math.max(0, ch - chunkSize);
-		var formattedLine = fullLine.substr(offset, chunkSize * 2) + '\n';
-		for (var i = 0; i < ch - offset - 1; i++) {
-			formattedLine += '-';
-		}
-		formattedLine += '^';
-
-		return {
-			line: lines.length,
-			ch: ch,
-			text: fullLine,
-			hint: formattedLine
+	return function(template, context) {
+		return context ? process(template, context) : function(context) {
+			return process(template, context);
 		};
-	}
-
-	function raiseError(message) {
-		var err = error(message);
-		var errObj = new Error(err.message, '', err.line);
-		errObj.line = err.line;
-		errObj.ch = err.ch;
-		errObj.name = err.name;
-		errObj.hint = err.hint;
-
-		throw errObj;
-	}
-	
-	// oops
-	function error(m) { 
-		var w = walker;
-		var info = getPosInfo(walker);
-		var tokens = session.tokens;
-		session.tokens = null;
-
-		var message = 'CSS parsing error at line ' + info.line + ', char ' + info.ch + ': ' + m;
-		message += '\n' +  info.hint;
-		return {
-			name: "ParseError",
-			message: message,
-			hint: info.hint,
-			line: info.line,
-			ch: info.ch
-		};
-	}
-
-
-	// token handlers follow for:
-	// white space, comment, string, identifier, number, operator
-	function white() {
-		var c = walker.ch,
-			token = '';
-	
-		while (c === " " || c === "\t") {
-			token += c;
-			c = walker.nextChar();
-		}
-	
-		tokener(token, 'white');
-	
-	}
-
-	function comment() {
-		var w = walker,
-			c = w.ch,
-			token = c,
-			cnext;
-	 
-		cnext = w.nextChar();
-
-		if (cnext === '/') {
-			// inline comment in SCSS and LESS
-			while (c && !(cnext === "\n" || cnext === "\r")) {
-				token += cnext;
-				c = cnext;
-				cnext = w.nextChar();
-			}
-		} else if (cnext === '*') {
-			// multiline CSS commment
-			while (c && !(c === "*" && cnext === "/")) {
-				token += cnext;
-				c = cnext;
-				cnext = w.nextChar();
-			}
-		} else {
-			// oops, not a comment, just a /
-			return tokener(token, token);
-		}
-		
-		token += cnext;
-		w.nextChar();
-		tokener(token, 'comment');
-	}
-
-	function eatString() {
-		var w = walker,
-			c = w.ch,
-			q = c,
-			token = c,
-			cnext;
-	
-		c = w.nextChar();
-
-		while (c !== q) {
-			if (c === '\n') {
-				cnext = w.nextChar();
-				if (cnext === "\\") {
-					token += c + cnext;
-				} else {
-					// end of line with no \ escape = bad
-					raiseError("Unterminated string");
-				}
-			} else {
-				if (c === "\\") {
-					token += c + w.nextChar();
-				} else {
-					token += c;
-				}
-			}
-		
-			c = w.nextChar();
-		}
-
-		token += c;
-
-		return token;
-	}
-
-	function str() {
-		var token = eatString();
-		walker.nextChar();
-		tokener(token, 'string');
-	}
-	
-	function brace() {
-		var w = walker,
-			c = w.ch,
-			depth = 1,
-			token = c,
-			stop = false;
-	
-		c = w.nextChar();
-	
-		while (c && !stop) {
-			if (c === '(') {
-				depth++;
-			} else if (c === ')') {
-				depth--;
-				if (!depth) {
-					stop = true;
-				}
-			} else if (c === '"' || c === "'") {
-				c = eatString();
-			} else if (c === '') {
-				raiseError("Unterminated brace");
-			}
-			
-			token += c;
-			c = w.nextChar();
-		}
-		
-		tokener(token, 'brace');
-	}
-
-	function identifier(pre) {
-		var c = walker.ch;
-		var token = pre ? pre + c : c;
-			
-		c = walker.nextChar();
-		var cc = c.charCodeAt(0);
-		while (isNameChar(c, cc) || isDigit(c, cc)) {
-			token += c;
-			c = walker.nextChar();
-			cc = c.charCodeAt(0);
-		}
-	
-		tokener(token, 'identifier');
-	}
-
-	function num() {
-		var w = walker,
-			c = w.ch,
-			token = c,
-			point = token === '.',
-			nondigit;
-		
-		c = w.nextChar();
-		nondigit = !isDigit(c);
-	
-		// .2px or .classname?
-		if (point && nondigit) {
-			// meh, NaN, could be a class name, so it's an operator for now
-			return tokener(token, '.');    
-		}
-		
-		// -2px or -moz-something
-		if (token === '-' && nondigit) {
-			return identifier('-');
-		}
-	
-		while (c !== '' && (isDigit(c) || (!point && c === '.'))) { // not end of source && digit or first instance of .
-			if (c === '.') {
-				point = true;
-			}
-			token += c;
-			c = w.nextChar();
-		}
-
-		tokener(token, 'number');    
-	
-	}
-
-	function op() {
-		var w = walker,
-			c = w.ch,
-			token = c,
-			next = w.nextChar();
-			
-		if (next === "=" && isOp(token, true)) {
-			token += next;
-			tokener(token, 'match');
-			w.nextChar();
-			return;
-		} 
-		
-		tokener(token, token);
-	}
-
-
-	// call the appropriate handler based on the first character in a token suspect
-	function tokenize() {
-		var ch = walker.ch;
-	
-		if (ch === " " || ch === "\t") {
-			return white();
-		}
-
-		if (ch === '/') {
-			return comment();
-		} 
-
-		if (ch === '"' || ch === "'") {
-			return str();
-		}
-		
-		if (ch === '(') {
-			return brace();
-		}
-	
-		if (ch === '-' || ch === '.' || isDigit(ch)) { // tricky - char: minus (-1px) or dash (-moz-stuff)
-			return num();
-		}
-	
-		if (isNameChar(ch)) {
-			return identifier();
-		}
-
-		if (isOp(ch)) {
-			return op();
-		}
-
-		if (ch === '\r') {
-			if (walker.peek() === '\n') {
-				ch += walker.nextChar();
-			}
-
-			tokener(ch, 'line');
-			walker.nextChar();
-			return;
-		}
-		
-		if (ch === '\n') {
-			tokener(ch, 'line');
-			walker.nextChar();
-			return;
-		}
-		
-		raiseError("Unrecognized character '" + ch + "'");
-	}
-
-	return {
-		/**
-		 * Sprits given source into tokens
-		 * @param {String} source
-		 * @returns {Array}
-		 */
-		lex: function (source) {
-			walker.init(source);
-			session.tokens = [];
-
-			// for empty source, return single space token
-			if (!source) {
-				session.tokens.push(this.white());
-			} else {
-				while (walker.ch !== '') {
-					tokenize();
-				}
-			}
-
-			var tokens = session.tokens;
-			session.tokens = null;
-			return tokens;
-		},
-		
-		/**
-		 * Tokenizes CSS source. It's like `lex()` method,
-		 * but also stores proper token indexes in source, 
-		 * so it's a bit slower
-		 * @param {String} source
-		 * @returns {Array}
-		 */
-		parse: function(source) {
-			// transform tokens
-			var tokens = this.lex(source), pos = 0, token;
-			for (var i = 0, il = tokens.length; i < il; i++) {
-				token = tokens[i];
-				token.start = pos;
-				token.end = (pos += token.value.length);
-			}
-			return tokens;
-		},
-
-		white: function() {
-			return {
-				value: '',
-				type:  'white',
-				start: 0,
-				end:   0
-			};
-		},
-		
-		toSource: function(toks) {
-			var i = 0, max = toks.length, src = '';
-			for (; i < max; i++) {
-				src += toks[i].value;
-			}
-			return src;
-		}
-	};
-});
-/**
- * Utility module for working with comments in source code
- * (mostly stripping it from source)
- */
-if (typeof module === 'object' && typeof define !== 'function') {
-	var define = function (factory) {
-		module.exports = factory(require, exports, module);
-	};
-}
-
-define('emmet/utils/comments',['require','exports','module','lodash','./common','../assets/range','../assets/stringStream'],function(require, exports, module) {
-	var _ = require('lodash');
-	var utils = require('./common');
-	var range = require('../assets/range');
-	var stringStream = require('../assets/stringStream');
-	var reHasComment = /\/\*|\/\//;
-
-	return {
-		/**
-		 * Replaces all comments in given CSS source with spaces,
-		 * which allows more reliable (and faster) token search
-		 * in CSS content
-		 * @param  {String} content CSS content
-		 * @return {String}
-		 */
-		strip: function(content) {
-			if (!reHasComment.test(content)) {
-				return content;
-			}
-
-			var stream = stringStream(content);
-			var replaceRanges = [];
-			var ch, ch2;
-
-			while ((ch = stream.next())) {
-				if (ch === '/') {
-					ch2 = stream.peek();
-					if (ch2 === '*') { // multiline CSS comment
-						stream.start = stream.pos - 1;
-
-						if (stream.skipTo('*/')) {
-							stream.pos += 2;
-						} else {
-							// unclosed comment
-							stream.skipToEnd();
-						}
-
-						replaceRanges.push([stream.start, stream.pos]);
-					} else if (ch2 === '/') {
-						// preprocessor’s single line comments
-						stream.start = stream.pos - 1;
-						while ((ch2 = stream.next())) {
-							if (ch2 === '\n' || ch2 == '\r') {
-								break
-							}
-						}
-
-						replaceRanges.push([stream.start, stream.pos]);
-					}
-				} else {
-					stream.skipQuoted();
-				}
-			}
-
-			return utils.replaceWith(content, replaceRanges, ' ');
-		}
-	};
-});
-if (typeof module === 'object' && typeof define !== 'function') {
-	var define = function (factory) {
-		module.exports = factory(require, exports, module);
-	};
-}
-
-define('emmet/utils/cssSections',['require','exports','module','lodash','./common','./comments','../assets/range','../assets/stringStream','../parser/css'],function(require, exports, module) {
-	var _ = require('lodash');
-	var utils = require('./common');
-	var commentsUtils = require('./comments');
-	var range = require('../assets/range');
-	var stringStream = require('../assets/stringStream');
-	var cssParser = require('../parser/css');
-
-	var idCounter = 1;
-	var maxId = 1000000;
-
-	var reSpaceTrim = /^(\s*).+?(\s*)$/;
-	var reSpace = /\s/g;
-	var reComma = /,/;
-
-	function isQuote(ch) {
-		return ch == '"' || ch == "'";
-	}
-
-	function getId() {
-		idCounter = (idCounter + 1) % maxId;
-		return 's' + idCounter;
-	}
-
-	/**
-	 * @param {Range} range Full selector range with additional
-	 * properties for matching name and content (@see findAllRules())
-	 * @param {String} source CSS source
-	 */
-	function CSSSection(rng, source) {
-		this.id = getId();
-		/** @type {CSSSection} */
-		this.parent = null;
-		/** @type {CSSSection} */
-		this.nextSibling = null;
-		/** @type {CSSSection} */
-		this.previousSibling = null;
-		this._source = source;
-		this._name = null;
-		this._content = null;
-
-		/**
-		 * Custom data for current nodes, used by other modules for
-		 * caching etc.
-		 * @type {Object}
-		 */
-		this._data = {};
-
-		if (!rng && source) {
-			rng = range(0, source);
-		}
-
-		this.range = rng;
-		this.children = [];
-	}
-
-	CSSSection.prototype = {
-		addChild: function(section) {
-			if (!(section instanceof CSSSection)) {
-				section = new CSSSection(section);
-			}
-
-			var lastChild = _.last(this.children);
-			if (lastChild) {
-				lastChild.nextSibling = section;
-				section.previousSibling = lastChild;
-			}
-			section.parent = this;
-
-			this.children.push(section);
-			return section;
-		},
-
-		/**
-		 * Returns root node
-		 * @return {CSSSection}
-		 */
-		root: function() {
-			var root = this;
-			do {
-				if (!root.parent) {
-					return root;
-				}
-			} while(root = root.parent);
-
-			return root;
-		},
-
-		/**
-		 * Returns currect CSS source
-		 * @return {String}
-		 */
-		source: function() {
-			return this._source || this.root()._source;
-		},
-
-		/**
-		 * Returns section name
-		 * @return {String}
-		 */
-		name: function() {
-			if (this._name === null) {
-				var range = this.nameRange();
-				if (range) {
-					this._name = range.substring(this.source());
-				}
-			}
-
-			return this._name;
-		},
-
-		/**
-		 * Returns section name range
-		 * @return {[type]} [description]
-		 */
-		nameRange: function() {
-			if (this.range && '_selectorEnd' in this.range) {
-				return range.create2(this.range.start, this.range._selectorEnd);
-			}
-		},
-
-		/**
-		 * Returns deepest child of current section (or section itself) 
-		 * which includes given position.
-		 * @param  {Number} pos
-		 * @return {CSSSection}
-		 */
-		matchDeep: function(pos) {
-			if (!this.range.inside(pos)) {
-				return null;
-			}
-
-			for (var i = 0, il = this.children.length, m; i < il; i++) {
-				m = this.children[i].matchDeep(pos);
-				if (m) {
-					return m;
-				}
-			};
-
-			return this.parent ? this : null;
-		},
-
-		/**
-		 * Returns current and all nested sections ranges
-		 * @return {Array}
-		 */
-		allRanges: function() {
-			var out = [];
-			if (this.parent) {
-				// add current range if it is not root node
-				out.push(this.range);
-			}
-
-			_.each(this.children, function(child) {
-				out = out.concat(child.allRanges());
-			});
-
-			return out;
-		},
-
-		data: function(key, value) {
-			if (typeof value !== 'undefined') {
-				this._data[key] = value;
-			}
-
-			return this._data[key];
-		},
-
-		stringify: function(indent) {
-			indent = indent || '';
-			var out = '';
-			_.each(this.children, function(item) {
-				out += indent + item.name().replace(/\n/g, '\\n') + '\n';
-				out += item.stringify(indent + '--');
-			});
-
-			return out;
-		},
-
-		/**
-		 * Returns current section’s actual content,
-		 * e.g. content without nested sections
-		 * @return {String} 
-		 */
-		content: function() {
-			if (this._content !== null) {
-				return this._content;
-			}
-
-			if (!this.range || !('_contentStart' in this.range)) {
-				return '';
-			}
-
-			var r = range.create2(this.range._contentStart + 1, this.range.end - 1);
-			var source = this.source();
-			var start = r.start;
-			var out = '';
-
-			_.each(this.children, function(child) {
-				out += source.substring(start, child.range.start);
-				start = child.range.end;
-			});
-
-			out += source.substring(start, r.end);
-			return this._content = utils.trim(out);
-		}
-	};
-
-	return {
-		/**
-		 * Finds all CSS rules‘ ranges in given CSS source
-		 * @param  {String} content CSS source
-		 * @return {Array} Array of ranges
-		 */
-		findAllRules: function(content) {
-			content = this.sanitize(content);
-			var stream = stringStream(content);
-			var ranges = [], matchedRanges;
-
-			var saveRule = _.bind(function(r) {
-				var selRange = this.extractSelector(content, r.start);
-				var rule = range.create2(selRange.start, r.end);
-				rule._selectorEnd = selRange.end;
-				rule._contentStart = r.start;
-				ranges.push(rule);
-			}, this);
-
-			var ch;
-			while (ch = stream.next()) {
-				if (isQuote(ch)) {
-					if (!stream.skipString(ch)) {
-						break; // unterminated string
-					}
-
-					continue;
-				}
-
-				if (ch == '{') {
-					matchedRanges = this.matchBracesRanges(content, stream.pos - 1);
-					_.each(matchedRanges, saveRule);
-
-					if (matchedRanges.length) {
-						stream.pos = _.last(matchedRanges).end;
-						continue;
-					} 
-				}
-			}
-			
-			return ranges.sort(function(a, b) {
-				return a.start - b.start;
-			});
-		},
-
-		/**
-		 * Matches curly braces content right after given position
-		 * @param  {String} content CSS content. Must not contain comments!
-		 * @param  {Number} pos     Search start position
-		 * @return {Range}
-		 */
-		matchBracesRanges: function(content, pos, sanitize) {
-			if (sanitize) {
-				content = this.sanitize(content);
-			}
-
-			var stream = stringStream(content);
-			stream.start = stream.pos = pos;
-			var stack = [], ranges = [];
-			var ch;
-			while (ch = stream.next()) {
-				if (ch == '{') {
-					stack.push(stream.pos - 1);
-				} else if (ch == '}') {
-					if (!stack.length) {
-						throw 'Invalid source structure (check for curly braces)';
-					}
-					ranges.push(range.create2(stack.pop(), stream.pos));
-					if (!stack.length) {
-						return ranges;
-					}
-				} else {
-					stream.skipQuoted();
-				}
-			}
-
-			return ranges;
-		},
-
-		/**
-		 * Extracts CSS selector from CSS document from
-		 * given position. The selector is located by moving backward
-		 * from given position which means that passed position
-		 * must point to the end of selector 
-		 * @param  {String}  content CSS source
-		 * @param  {Number}  pos     Search position
-		 * @param  {Boolean} sanitize Sanitize CSS source before processing.
-		 * Off by default and assumes that CSS must be comment-free already
-		 * (for performance)
-		 * @return {Range}
-		 */
-		extractSelector: function(content, pos, sanitize) {
-			if (sanitize) {
-				content = this.sanitize(content);
-			}
-
-			var skipString = function() {
-				var quote = content.charAt(pos);
-				if (quote == '"' || quote == "'") {
-					while (--pos >= 0) {
-						if (content.charAt(pos) == quote && content.charAt(pos - 1) != '\\') {
-							break;
-						}
-					}
-					return true;
-				}
-
-				return false;
-			};
-
-			// find CSS selector
-			var ch;
-			var endPos = pos;
-			while (--pos >= 0) {
-				if (skipString()) continue;
-
-				ch = content.charAt(pos);
-				if (ch == ')') {
-					// looks like it’s a preprocessor thing,
-					// most likely a mixin arguments list, e.g.
-					// .mixin (@arg1; @arg2) {...}
-					while (--pos >= 0) {
-						if (skipString()) continue;
-
-						if (content.charAt(pos) == '(') {
-							break;
-						}
-					}
-					continue;
-				}
-
-				if (ch == '{' || ch == '}' || ch == ';') {
-					pos++;
-					break;
-				}
-			}
-
-			if (pos < 0) {
-				pos = 0;
-			}
-			
-			var selector = content.substring(pos, endPos);
-
-			// trim whitespace from matched selector
-			var m = selector.replace(reSpace, ' ').match(reSpaceTrim);
-			if (m) {
-				pos += m[1].length;
-				endPos -= m[2].length;
-			}
-
-			return range.create2(pos, endPos);
-		},
-
-		/**
-		 * Search for nearest CSS rule/section that contains
-		 * given position
-		 * @param  {String} content CSS content or matched CSS rules (array of ranges)
-		 * @param  {Number} pos     Search position
-		 * @return {Range}
-		 */
-		matchEnclosingRule: function(content, pos) {
-			if (_.isString(content)) {
-				content = this.findAllRules(content);
-			}
-
-			var rules = _.filter(content, function(r) {
-				return r.inside(pos);
-			});
-
-			return _.last(rules);
-		},
-
-		/**
-		 * Locates CSS rule next or before given position
-		 * @param  {String}  content    CSS content
-		 * @param  {Number}  pos        Search start position
-		 * @param  {Boolean} isBackward Search backward (find previous rule insteaf of next one)
-		 * @return {Range}
-		 */
-		locateRule: function(content, pos, isBackward) {
-			var rules = this.findAllRules(content);
-			var ctxRule = this.matchEnclosingRule(rules, pos);
-
-			if (ctxRule) {
-				return ctxRule;
-
-				// XXX why did I did this? Have to figure out
-				// 
-				// we have a context rule but it may contain nested rules
-				// rules = _.filter(rules, function(r) {
-				// 	return ctxRule.contains(r);
-				// });
-
-				// console.log('Nested rules', rules);
-
-
-				// // no nested rules
-				// if (!rules.length) {
-				// 	return ctxRule;
-				// }
-			}
-
-			for (var i = 0, il = rules.length; i < il; i++) {
-				if (rules[i].start > pos) {
-					return rules[isBackward ? i - 1 : i];
-				}
-			}
-		},
-
-		/**
-		 * Sanitizes given CSS content: replaces content that may 
-		 * interfere with parsing (comments, interpolations, etc.)
-		 * with spaces. Sanitized content MUST NOT be used for
-		 * editing or outputting, it just simplifies searching
-		 * @param  {String} content CSS content
-		 * @return {String}
-		 */
-		sanitize: function(content) {
-			content = commentsUtils.strip(content);
-
-			// remove preprocessor string interpolations like #{var}
-			var stream = stringStream(content);
-			var replaceRanges = [];
-			var ch, ch2;
-
-			while ((ch = stream.next())) {
-				if (isQuote(ch)) {
-					// skip string
-					stream.skipString(ch)
-					continue;
-				} else if (ch === '#' || ch === '@') {
-					ch2 = stream.peek();
-					if (ch2 === '{') { // string interpolation
-						stream.start = stream.pos - 1;
-
-						if (stream.skipTo('}')) {
-							stream.pos += 1;
-						} else {
-							throw 'Invalid string interpolation at ' + stream.start;
-						}
-
-						replaceRanges.push([stream.start, stream.pos]);
-					}
-				}
-			}
-
-			return utils.replaceWith(content, replaceRanges, 'a');
-		},
-
-		/**
-		 * Parses and returns all sections in given CSS
-		 * as tree-like structure, e.g. provides nesting
-		 * info
-		 * @param  {String} content CSS content
-		 * @return {CSSSection}
-		 */
-		sectionTree: function(content) {
-			var root = new CSSSection(null, content);
-			var rules = this.findAllRules(content);
-
-			// rules are sorted in order they appear in CSS source
-			// so we can optimize their nesting routine
-			var insert = function(range, ctx) {
-				while (ctx && ctx.range) {
-					if (ctx.range.contains(range)) {
-						return ctx.addChild(range);
-					}
-
-					ctx = ctx.parent;
-				}
-
-				// if we are here then given range is a top-level section
-				return root.addChild(range);
-			};
-
-			var ctx = root;
-			_.each(rules, function(r) {
-				ctx = insert(r, ctx);
-			});
-
-			return root;
-		},
-
-		/**
-		 * Returns ranges for all nested sections, available in
-		 * given CSS rule
-		 * @param  {CSSEditContainer} rule
-		 * @return {Array}
-		 */
-		nestedSectionsInRule: function(rule) {
-			var offset = rule.valueRange(true).start;
-			var nestedSections = this.findAllRules(rule.valueRange().substring(rule.source));
-			_.each(nestedSections, function(section) {
-				section.start += offset;
-				section.end += offset;
-				section._selectorEnd += offset;
-				section._contentStart += offset;
-			});
-			return nestedSections;
-		},
-
-		CSSSection: CSSSection
 	};
 });
 /**
@@ -11349,13 +12184,14 @@ if (typeof module === 'object' && typeof define !== 'function') {
 	};
 }
 
-define('emmet/resolver/css',['require','exports','module','lodash','../assets/preferences','../assets/resources','../assets/stringStream','../assets/caniuse','../utils/common','../editTree/css'],function(require, exports, module) {
+define('emmet/resolver/css',['require','exports','module','lodash','../assets/preferences','../assets/resources','../assets/stringStream','../assets/caniuse','../utils/common','../utils/template','../editTree/css'],function(require, exports, module) {
 	var _ = require('lodash');
 	var prefs = require('../assets/preferences');
 	var resources = require('../assets/resources');
 	var stringStream = require('../assets/stringStream');
 	var ciu = require('../assets/caniuse');
 	var utils = require('../utils/common');
+	var template = require('../utils/template');
 	var cssEditTree = require('../editTree/css');
 
 	var prefixObj = {
@@ -11433,13 +12269,13 @@ define('emmet/resolver/css',['require','exports','module','lodash','../assets/pr
 			+ 'need dashes before abbreviations: Emmet will produce ' 
 			+ 'vendor-prefixed properties for you.');
 	
-	var descTemplate = _.template('A comma-separated list of CSS properties that may have ' 
+	var descTemplate = template('A comma-separated list of CSS properties that may have ' 
 		+ '<code><%= vendor %></code> vendor prefix. This list is used to generate '
 		+ 'a list of prefixed properties when expanding <code>-property</code> '
 		+ 'abbreviations. Empty list means that all possible CSS values may ' 
 		+ 'have <code><%= vendor %></code> prefix.');
 	
-	var descAddonTemplate = _.template('A comma-separated list of <em>additional</em> CSS properties ' 
+	var descAddonTemplate = template('A comma-separated list of <em>additional</em> CSS properties ' 
 			+ 'for <code>css.<%= vendor %>Preperties</code> preference. ' 
 			+ 'You should use this list if you want to add or remove a few CSS ' 
 			+ 'properties to original set. To add a new property, simply write its name, '
@@ -12082,7 +12918,7 @@ define('emmet/resolver/css',['require','exports','module','lodash','../assets/pr
 		 */
 		expand: function(abbr, value, syntax) {
 			syntax = syntax || 'css';
-			var autoInsertPrefixes = prefs.get('css.autoInsertVendorPrefixes');
+			var autoInsertPrefixes = prefs.get(syntax + '.autoInsertVendorPrefixes');
 			
 			// check if snippet should be transformed to !important
 			var isImportant = /^(.+)\!$/.test(abbr);
@@ -14697,10 +15533,11 @@ if (typeof module === 'object' && typeof define !== 'function') {
 	};
 }
 
-define('emmet/filter/comment',['require','exports','module','lodash','../assets/preferences','../utils/common','../utils/abbreviation','./main'],function(require, exports, module) {
+define('emmet/filter/comment',['require','exports','module','lodash','../assets/preferences','../utils/common','../utils/template','../utils/abbreviation','./main'],function(require, exports, module) {
 	var _ = require('lodash');
 	var prefs = require('../assets/preferences');
 	var utils = require('../utils/common');
+	var template = require('../utils/template');
 	var abbrUtils = require('../utils/abbreviation');
 	var filterCore = require('./main');
 	
@@ -14790,8 +15627,8 @@ define('emmet/filter/comment',['require','exports','module','lodash','../assets/
 	}
 
 	return function(tree) {
-		var templateBefore = _.template(prefs.get('filter.commentBefore'));
-		var templateAfter = _.template(prefs.get('filter.commentAfter'));
+		var templateBefore = template(prefs.get('filter.commentBefore'));
+		var templateAfter = template(prefs.get('filter.commentAfter'));
 		
 		return process(tree, templateBefore, templateAfter);
 	};
@@ -16769,931 +17606,6 @@ define('emmet/parser/abbreviation',['require','exports','module','lodash','../as
 	};
 });
 /**
- * HTML matcher: takes string and searches for HTML tag pairs for given position 
- * 
- * Unlike “classic” matchers, it parses content from the specified 
- * position, not from the start, so it may work even outside HTML documents
- * (for example, inside strings of programming languages like JavaScript, Python 
- * etc.)
- */
-if (typeof module === 'object' && typeof define !== 'function') {
-	var define = function (factory) {
-		module.exports = factory(require, exports, module);
-	};
-}
-
-define('emmet/assets/htmlMatcher',['require','exports','module','./range'],function(require, exports, module) {
-	var range = require('./range');
-
-	// Regular Expressions for parsing tags and attributes
-	var reOpenTag = /^<([\w\:\-]+)((?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*)\s*(\/?)>/;
-	var reCloseTag = /^<\/([\w\:\-]+)[^>]*>/;
-
-	function openTag(i, match) {
-		return {
-			name: match[1],
-			selfClose: !!match[3],
-			/** @type Range */
-			range: range(i, match[0]),
-			type: 'open'
-		};
-	}
-	
-	function closeTag(i, match) {
-		return {
-			name: match[1],
-			/** @type Range */
-			range: range(i, match[0]),
-			type: 'close'
-		};
-	}
-	
-	function comment(i, match) {
-		return {
-			/** @type Range */
-			range: range(i, typeof match == 'number' ? match - i : match[0]),
-			type: 'comment'
-		};
-	}
-	
-	/**
-	 * Creates new tag matcher session
-	 * @param {String} text
-	 */
-	function createMatcher(text) {
-		var memo = {}, m;
-		return {
-			/**
-			 * Test if given position matches opening tag
-			 * @param {Number} i
-			 * @returns {Object} Matched tag object
-			 */
-			open: function(i) {
-				var m = this.matches(i);
-				return m && m.type == 'open' ? m : null;
-			},
-			
-			/**
-			 * Test if given position matches closing tag
-			 * @param {Number} i
-			 * @returns {Object} Matched tag object
-			 */
-			close: function(i) {
-				var m = this.matches(i);
-				return m && m.type == 'close' ? m : null;
-			},
-			
-			/**
-			 * Matches either opening or closing tag for given position
-			 * @param i
-			 * @returns
-			 */
-			matches: function(i) {
-				var key = 'p' + i;
-				
-				if (!(key in memo)) {
-					memo[key] = false;
-					if (text.charAt(i) == '<') {
-						var substr = text.slice(i);
-						if ((m = substr.match(reOpenTag))) {
-							memo[key] = openTag(i, m);
-						} else if ((m = substr.match(reCloseTag))) {
-							memo[key] = closeTag(i, m);
-						}
-					}
-				}
-				
-				return memo[key];
-			},
-			
-			/**
-			 * Returns original text
-			 * @returns {String}
-			 */
-			text: function() {
-				return text;
-			},
-
-			clean: function() {
-				memo = text = m = null;
-			}
-		};
-	}
-	
-	function matches(text, pos, pattern) {
-		return text.substring(pos, pos + pattern.length) == pattern;
-	}
-	
-	/**
-	 * Search for closing pair of opening tag
-	 * @param {Object} open Open tag instance
-	 * @param {Object} matcher Matcher instance
-	 */
-	function findClosingPair(open, matcher) {
-		var stack = [], tag = null;
-		var text = matcher.text();
-		
-		for (var pos = open.range.end, len = text.length; pos < len; pos++) {
-			if (matches(text, pos, '<!--')) {
-				// skip to end of comment
-				for (var j = pos; j < len; j++) {
-					if (matches(text, j, '-->')) {
-						pos = j + 3;
-						break;
-					}
-				}
-			}
-			
-			if ((tag = matcher.matches(pos))) {
-				if (tag.type == 'open' && !tag.selfClose) {
-					stack.push(tag.name);
-				} else if (tag.type == 'close') {
-					if (!stack.length) { // found valid pair?
-						return tag.name == open.name ? tag : null;
-					}
-					
-					// check if current closing tag matches previously opened one
-					if (stack[stack.length - 1] == tag.name) {
-						stack.pop();
-					} else {
-						var found = false;
-						while (stack.length && !found) {
-							var last = stack.pop();
-							if (last == tag.name) {
-								found = true;
-							}
-						}
-						
-						if (!stack.length && !found) {
-							return tag.name == open.name ? tag : null;
-						}
-					}
-				}
-
-				pos = tag.range.end - 1;
-			}
-		}
-	}
-	
-	return {
-		/**
-		 * Main function: search for tag pair in <code>text</code> for given 
-		 * position
-		 * @memberOf htmlMatcher
-		 * @param {String} text 
-		 * @param {Number} pos
-		 * @returns {Object}
-		 */
-		find: function(text, pos) {
-			var matcher = createMatcher(text); 
-			var open = null, close = null;
-			var j, jl;
-			
-			for (var i = pos; i >= 0; i--) {
-				if ((open = matcher.open(i))) {
-					// found opening tag
-					if (open.selfClose) {
-						if (open.range.cmp(pos, 'lt', 'gt')) {
-							// inside self-closing tag, found match
-							break;
-						}
-						
-						// outside self-closing tag, continue
-						continue;
-					}
-					
-					close = findClosingPair(open, matcher);
-					if (close) {
-						// found closing tag.
-						var r = range.create2(open.range.start, close.range.end);
-						if (r.contains(pos)) {
-							break;
-						}
-					} else if (open.range.contains(pos)) {
-						// we inside empty HTML tag like <br>
-						break;
-					}
-					
-					open = null;
-				} else if (matches(text, i, '-->')) {
-					// skip back to comment start
-					for (j = i - 1; j >= 0; j--) {
-						if (matches(text, j, '-->')) {
-							// found another comment end, do nothing
-							break;
-						} else if (matches(text, j, '<!--')) {
-							i = j;
-							break;
-						}
-					}
-				} else if (matches(text, i, '<!--')) {
-					// we're inside comment, match it
-					for (j = i + 4, jl = text.length; j < jl; j++) {
-						if (matches(text, j, '-->')) {
-							j += 3;
-							break;
-						}
-					}
-					
-					open = comment(i, j);
-					break;
-				}
-			}
-			
-			matcher.clean();
-
-			if (open) {
-				var outerRange = null;
-				var innerRange = null;
-				
-				if (close) {
-					outerRange = range.create2(open.range.start, close.range.end);
-					innerRange = range.create2(open.range.end, close.range.start);
-				} else {
-					outerRange = innerRange = range.create2(open.range.start, open.range.end);
-				}
-				
-				if (open.type == 'comment') {
-					// adjust positions of inner range for comment
-					var _c = outerRange.substring(text);
-					innerRange.start += _c.length - _c.replace(/^<\!--\s*/, '').length;
-					innerRange.end -= _c.length - _c.replace(/\s*-->$/, '').length;
-				}
-				
-				return {
-					open: open,
-					close: close,
-					type: open.type == 'comment' ? 'comment' : 'tag',
-					innerRange: innerRange,
-					innerContent: function() {
-						return this.innerRange.substring(text);
-					},
-					outerRange: outerRange,
-					outerContent: function() {
-						return this.outerRange.substring(text);
-					},
-					range: !innerRange.length() || !innerRange.cmp(pos, 'lte', 'gte') ? outerRange : innerRange,
-					content: function() {
-						return this.range.substring(text);
-					},
-					source: text
-				};
-			}
-		},
-		
-		/**
-		 * The same as <code>find()</code> method, but restricts matched result 
-		 * to <code>tag</code> type
-		 * @param {String} text 
-		 * @param {Number} pos
-		 * @returns {Object}
-		 */
-		tag: function(text, pos) {
-			var result = this.find(text, pos);
-			if (result && result.type == 'tag') {
-				return result;
-			}
-		}
-	};
-});
-/**
- * HTML tokenizer by Marijn Haverbeke
- * http://codemirror.net/
- * @constructor
- * @memberOf __xmlParseDefine
- * @param {Function} require
- * @param {Underscore} _
- */
-if (typeof module === 'object' && typeof define !== 'function') {
-	var define = function (factory) {
-		module.exports = factory(require, exports, module);
-	};
-}
-
-define('emmet/parser/xml',['require','exports','module','lodash','../assets/stringStream'],function(require, exports, module) {
-	var _ = require('lodash');
-	var stringStream = require('../assets/stringStream');
-
-	var Kludges = {
-		autoSelfClosers : {},
-		implicitlyClosed : {},
-		contextGrabbers : {},
-		doNotIndent : {},
-		allowUnquoted : true,
-		allowMissing : true
-	};
-
-	// Return variables for tokenizers
-	var tagName = null, type = null;
-
-	function inText(stream, state) {
-		function chain(parser) {
-			state.tokenize = parser;
-			return parser(stream, state);
-		}
-
-		var ch = stream.next();
-		if (ch == "<") {
-			if (stream.eat("!")) {
-				if (stream.eat("[")) {
-					if (stream.match("CDATA["))
-						return chain(inBlock("atom", "]]>"));
-					else
-						return null;
-				} else if (stream.match("--"))
-					return chain(inBlock("comment", "-->"));
-				else if (stream.match("DOCTYPE", true, true)) {
-					stream.eatWhile(/[\w\._\-]/);
-					return chain(doctype(1));
-				} else
-					return null;
-			} else if (stream.eat("?")) {
-				stream.eatWhile(/[\w\._\-]/);
-				state.tokenize = inBlock("meta", "?>");
-				return "meta";
-			} else {
-				type = stream.eat("/") ? "closeTag" : "openTag";
-				stream.eatSpace();
-				tagName = "";
-				var c;
-				while ((c = stream.eat(/[^\s\u00a0=<>\"\'\/?]/)))
-					tagName += c;
-				state.tokenize = inTag;
-				return "tag";
-			}
-		} else if (ch == "&") {
-			var ok;
-			if (stream.eat("#")) {
-				if (stream.eat("x")) {
-					ok = stream.eatWhile(/[a-fA-F\d]/) && stream.eat(";");
-				} else {
-					ok = stream.eatWhile(/[\d]/) && stream.eat(";");
-				}
-			} else {
-				ok = stream.eatWhile(/[\w\.\-:]/) && stream.eat(";");
-			}
-			return ok ? "atom" : "error";
-		} else {
-			stream.eatWhile(/[^&<]/);
-			return "text";
-		}
-	}
-
-	function inTag(stream, state) {
-		var ch = stream.next();
-		if (ch == ">" || (ch == "/" && stream.eat(">"))) {
-			state.tokenize = inText;
-			type = ch == ">" ? "endTag" : "selfcloseTag";
-			return "tag";
-		} else if (ch == "=") {
-			type = "equals";
-			return null;
-		} else if (/[\'\"]/.test(ch)) {
-			state.tokenize = inAttribute(ch);
-			return state.tokenize(stream, state);
-		} else {
-			stream.eatWhile(/[^\s\u00a0=<>\"\'\/?]/);
-			return "word";
-		}
-	}
-
-	function inAttribute(quote) {
-		return function(stream, state) {
-			while (!stream.eol()) {
-				if (stream.next() == quote) {
-					state.tokenize = inTag;
-					break;
-				}
-			}
-			return "string";
-		};
-	}
-
-	function inBlock(style, terminator) {
-		return function(stream, state) {
-			while (!stream.eol()) {
-				if (stream.match(terminator)) {
-					state.tokenize = inText;
-					break;
-				}
-				stream.next();
-			}
-			return style;
-		};
-	}
-	
-	function doctype(depth) {
-		return function(stream, state) {
-			var ch;
-			while ((ch = stream.next()) !== null) {
-				if (ch == "<") {
-					state.tokenize = doctype(depth + 1);
-					return state.tokenize(stream, state);
-				} else if (ch == ">") {
-					if (depth == 1) {
-						state.tokenize = inText;
-						break;
-					} else {
-						state.tokenize = doctype(depth - 1);
-						return state.tokenize(stream, state);
-					}
-				}
-			}
-			return "meta";
-		};
-	}
-
-	var curState = null, setStyle;
-	function pass() {
-		for (var i = arguments.length - 1; i >= 0; i--)
-			curState.cc.push(arguments[i]);
-	}
-	
-	function cont() {
-		pass.apply(null, arguments);
-		return true;
-	}
-
-	function pushContext(tagName, startOfLine) {
-		var noIndent = Kludges.doNotIndent.hasOwnProperty(tagName) 
-			|| (curState.context && curState.context.noIndent);
-		curState.context = {
-			prev : curState.context,
-			tagName : tagName,
-			indent : curState.indented,
-			startOfLine : startOfLine,
-			noIndent : noIndent
-		};
-	}
-	
-	function popContext() {
-		if (curState.context)
-			curState.context = curState.context.prev;
-	}
-
-	function element(type) {
-		if (type == "openTag") {
-			curState.tagName = tagName;
-			return cont(attributes, endtag(curState.startOfLine));
-		} else if (type == "closeTag") {
-			var err = false;
-			if (curState.context) {
-				if (curState.context.tagName != tagName) {
-					if (Kludges.implicitlyClosed.hasOwnProperty(curState.context.tagName.toLowerCase())) {
-						popContext();
-					}
-					err = !curState.context || curState.context.tagName != tagName;
-				}
-			} else {
-				err = true;
-			}
-			
-			if (err)
-				setStyle = "error";
-			return cont(endclosetag(err));
-		}
-		return cont();
-	}
-	
-	function endtag(startOfLine) {
-		return function(type) {
-			if (type == "selfcloseTag"
-					|| (type == "endTag" && Kludges.autoSelfClosers
-							.hasOwnProperty(curState.tagName
-									.toLowerCase()))) {
-				maybePopContext(curState.tagName.toLowerCase());
-				return cont();
-			}
-			if (type == "endTag") {
-				maybePopContext(curState.tagName.toLowerCase());
-				pushContext(curState.tagName, startOfLine);
-				return cont();
-			}
-			return cont();
-		};
-	}
-	
-	function endclosetag(err) {
-		return function(type) {
-			if (err)
-				setStyle = "error";
-			if (type == "endTag") {
-				popContext();
-				return cont();
-			}
-			setStyle = "error";
-			return cont(arguments.callee);
-		};
-	}
-	
-	function maybePopContext(nextTagName) {
-		var parentTagName;
-		while (true) {
-			if (!curState.context) {
-				return;
-			}
-			parentTagName = curState.context.tagName.toLowerCase();
-			if (!Kludges.contextGrabbers.hasOwnProperty(parentTagName)
-					|| !Kludges.contextGrabbers[parentTagName].hasOwnProperty(nextTagName)) {
-				return;
-			}
-			popContext();
-		}
-	}
-
-	function attributes(type) {
-		if (type == "word") {
-			setStyle = "attribute";
-			return cont(attribute, attributes);
-		}
-		if (type == "endTag" || type == "selfcloseTag")
-			return pass();
-		setStyle = "error";
-		return cont(attributes);
-	}
-	
-	function attribute(type) {
-		if (type == "equals")
-			return cont(attvalue, attributes);
-		if (!Kludges.allowMissing)
-			setStyle = "error";
-		return (type == "endTag" || type == "selfcloseTag") ? pass()
-				: cont();
-	}
-	
-	function attvalue(type) {
-		if (type == "string")
-			return cont(attvaluemaybe);
-		if (type == "word" && Kludges.allowUnquoted) {
-			setStyle = "string";
-			return cont();
-		}
-		setStyle = "error";
-		return (type == "endTag" || type == "selfCloseTag") ? pass()
-				: cont();
-	}
-	
-	function attvaluemaybe(type) {
-		if (type == "string")
-			return cont(attvaluemaybe);
-		else
-			return pass();
-	}
-	
-	function startState() {
-		return {
-			tokenize : inText,
-			cc : [],
-			indented : 0,
-			startOfLine : true,
-			tagName : null,
-			context : null
-		};
-	}
-	
-	function token(stream, state) {
-		if (stream.sol()) {
-			state.startOfLine = true;
-			state.indented = 0;
-		}
-		
-		if (stream.eatSpace())
-			return null;
-
-		setStyle = type = tagName = null;
-		var style = state.tokenize(stream, state);
-		state.type = type;
-		if ((style || type) && style != "comment") {
-			curState = state;
-			while (true) {
-				var comb = state.cc.pop() || element;
-				if (comb(type || style))
-					break;
-			}
-		}
-		state.startOfLine = false;
-		return setStyle || style;
-	}
-
-	return {
-		/**
-		 * @memberOf emmet.xmlParser
-		 * @returns
-		 */
-		parse: function(data, offset) {
-			offset = offset || 0;
-			var state = startState();
-			var stream = stringStream.create(data);
-			var tokens = [];
-			while (!stream.eol()) {
-				tokens.push({
-					type: token(stream, state),
-					start: stream.start + offset,
-					end: stream.pos + offset
-				});
-				stream.start = stream.pos;
-			}
-			
-			return tokens;
-		}		
-	};
-});
-
-/**
- * XML EditTree is a module that can parse an XML/HTML element into a tree with 
- * convenient methods for adding, modifying and removing attributes. These 
- * changes can be written back to string with respect of code formatting.
- * 
- * @memberOf __xmlEditTreeDefine
- * @constructor
- * @param {Function} require
- * @param {Underscore} _ 
- */
-if (typeof module === 'object' && typeof define !== 'function') {
-	var define = function (factory) {
-		module.exports = factory(require, exports, module);
-	};
-}
-
-define('emmet/editTree/xml',['require','exports','module','lodash','./base','../parser/xml','../assets/range','../utils/common'],function(require, exports, module) {
-	var _ = require('lodash');
-	var editTree = require('./base');
-	var xmlParser = require('../parser/xml');
-	var range = require('../assets/range');
-	var utils = require('../utils/common');
-
-	var defaultOptions = {
-		styleBefore: ' ',
-		styleSeparator: '=',
-		styleQuote: '"',
-		offset: 0
-	};
-	
-	var startTag = /^<([\w\:\-]+)((?:\s+[\w\-:]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+))?)*)\s*(\/?)>/m;
-	
-	var XMLEditContainer = editTree.EditContainer.extend({
-		initialize: function(source, options) {
-			_.defaults(this.options, defaultOptions);
-			this._positions.name = 1;
-			
-			var attrToken = null;
-			var tokens = xmlParser.parse(source);
-			
-			_.each(tokens, function(token) {
-				token.value = range.create(token).substring(source);
-				switch (token.type) {
-					case 'tag':
-						if (/^<[^\/]+/.test(token.value)) {
-							this._name = token.value.substring(1);
-						}
-						break;
-						
-					case 'attribute':
-						// add empty attribute
-						if (attrToken) {
-							this._children.push(new XMLEditElement(this, attrToken));
-						}
-						
-						attrToken = token;
-						break;
-						
-					case 'string':
-						this._children.push(new XMLEditElement(this, attrToken, token));
-						attrToken = null;
-						break;
-				}
-			}, this);
-			
-			if (attrToken) {
-				this._children.push(new XMLEditElement(this, attrToken));
-			}
-			
-			this._saveStyle();
-		},
-		
-		/**
-		 * Remembers all styles of properties
-		 * @private
-		 */
-		_saveStyle: function() {
-			var start = this.nameRange().end;
-			var source = this.source;
-			
-			_.each(this.list(), /** @param {EditElement} p */ function(p) {
-				p.styleBefore = source.substring(start, p.namePosition());
-				
-				if (p.valuePosition() !== -1) {
-					p.styleSeparator = source.substring(p.namePosition() + p.name().length, p.valuePosition() - p.styleQuote.length);
-				}
-				
-				start = p.range().end;
-			});
-		},
-		
-		/**
-		 * Adds new attribute 
-		 * @param {String} name Property name
-		 * @param {String} value Property value
-		 * @param {Number} pos Position at which to insert new property. By 
-		 * default the property is inserted at the end of rule 
-		 */
-		add: function(name, value, pos) {
-			var list = this.list();
-			var start = this.nameRange().end;
-			var styles = _.pick(this.options, 'styleBefore', 'styleSeparator', 'styleQuote');
-			
-			if (_.isUndefined(pos))
-				pos = list.length;
-			
-			
-			/** @type XMLEditAttribute */
-			var donor = list[pos];
-			if (donor) {
-				start = donor.fullRange().start;
-			} else if ((donor = list[pos - 1])) {
-				start = donor.range().end;
-			}
-			
-			if (donor) {
-				styles = _.pick(donor, 'styleBefore', 'styleSeparator', 'styleQuote');
-			}
-			
-			value = styles.styleQuote + value + styles.styleQuote;
-			
-			var attribute = new XMLEditElement(this, 
-					editTree.createToken(start + styles.styleBefore.length, name),
-					editTree.createToken(start + styles.styleBefore.length + name.length 
-							+ styles.styleSeparator.length, value)
-					);
-			
-			_.extend(attribute, styles);
-			
-			// write new attribute into the source
-			this._updateSource(attribute.styleBefore + attribute.toString(), start);
-			
-			// insert new attribute
-			this._children.splice(pos, 0, attribute);
-			return attribute;
-		},
-
-		/**
-		 * A special case of attribute editing: adds class value to existing
-		 * `class` attribute
-		 * @param {String} value
-		 */
-		addClass: function(value) {
-			var attr = this.get('class');
-			value = utils.trim(value);
-			if (!attr) {
-				return this.add('class', value);
-			}
-
-			var classVal = attr.value();
-			var classList = ' ' + classVal.replace(/\n/g, ' ') + ' ';
-			if (!~classList.indexOf(' ' + value + ' ')) {
-				attr.value(classVal + ' ' + value);
-			}
-		},
-
-		/**
-		 * A special case of attribute editing: removes class value from existing
-		 * `class` attribute
-		 * @param {String} value
-		 */
-		removeClass: function(value) {
-			var attr = this.get('class');
-			value = utils.trim(value);
-			if (!attr) {
-				return;
-			}
-
-			var reClass = new RegExp('(^|\\s+)' + utils.escapeForRegexp(value));
-			var classVal = attr.value().replace(reClass, '');
-			if (!utils.trim(classVal)) {
-				this.remove('class');
-			} else {
-				attr.value(classVal);
-			}
-		}
-	});
-	
-	var XMLEditElement = editTree.EditElement.extend({
-		initialize: function(parent, nameToken, valueToken) {
-			this.styleBefore = parent.options.styleBefore;
-			this.styleSeparator = parent.options.styleSeparator;
-			
-			var value = '', quote = parent.options.styleQuote;
-			if (valueToken) {
-				value = valueToken.value;
-				quote = value.charAt(0);
-				if (quote == '"' || quote == "'") {
-					value = value.substring(1);
-				} else {
-					quote = '';
-				}
-				
-				if (quote && value.charAt(value.length - 1) == quote) {
-					value = value.substring(0, value.length - 1);
-				}
-			}
-			
-			this.styleQuote = quote;
-			
-			this._value = value;
-			this._positions.value = valueToken ? valueToken.start + quote.length : -1;
-		},
-		
-		/**
-		 * Returns full rule range, with indentation
-		 * @param {Boolean} isAbsolute Return absolute range (with respect of
-		 * rule offset)
-		 * @returns {Range}
-		 */
-		fullRange: function(isAbsolute) {
-			var r = this.range(isAbsolute);
-			r.start -= this.styleBefore.length;
-			return r;
-		},
-		
-		valueOf: function() {
-			return this.name() + this.styleSeparator
-				+ this.styleQuote + this.value() + this.styleQuote;
-		}
-	});
-	
-	return {
-		/**
-		 * Parses HTML element into editable tree
-		 * @param {String} source
-		 * @param {Object} options
-		 * @memberOf emmet.htmlEditTree
-		 * @returns {EditContainer}
-		 */
-		parse: function(source, options) {
-			return new XMLEditContainer(source, options);
-		},
-		
-		/**
-		 * Extract and parse HTML from specified position in <code>content</code> 
-		 * @param {String} content CSS source code
-		 * @param {Number} pos Character position where to start source code extraction
-		 * @returns {XMLEditElement}
-		 */
-		parseFromPosition: function(content, pos, isBackward) {
-			var bounds = this.extractTag(content, pos, isBackward);
-			if (!bounds || !bounds.inside(pos))
-				// no matching HTML tag or caret outside tag bounds
-				return null;
-			
-			return this.parse(bounds.substring(content), {
-				offset: bounds.start
-			});
-		},
-		
-		/**
-		 * Extracts nearest HTML tag range from <code>content</code>, starting at 
-		 * <code>pos</code> position
-		 * @param {String} content
-		 * @param {Number} pos
-		 * @param {Boolean} isBackward
-		 * @returns {Range}
-		 */
-		extractTag: function(content, pos, isBackward) {
-			var len = content.length, i;
-			
-			// max extraction length. I don't think there may be tags larger 
-			// than 2000 characters length
-			var maxLen = Math.min(2000, len);
-			
-			/** @type Range */
-			var r = null;
-			
-			var match = function(pos) {
-				var m;
-				if (content.charAt(pos) == '<' && (m = content.substr(pos, maxLen).match(startTag)))
-					return range.create(pos, m[0]);
-			};
-			
-			// lookup backward, in case we are inside tag already
-			for (i = pos; i >= 0; i--) {
-				if ((r = match(i))) break;
-			}
-			
-			if (r && (r.inside(pos) || isBackward))
-				return r;
-			
-			if (!r && isBackward)
-				return null;
-			
-			// search forward
-			for (i = pos; i < len; i++) {
-				if ((r = match(i)))
-					return r;
-			}
-		}
-	};
-});
-/**
  * Utility methods for Emmet actions
  * @author Sergey Chikuyonok (serge.che@gmail.com) <http://chikuyonok.ru>
  */
@@ -17703,9 +17615,10 @@ if (typeof module === 'object' && typeof define !== 'function') {
 	};
 }
 
-define('emmet/utils/action',['require','exports','module','lodash','./common','../parser/abbreviation','../assets/htmlMatcher','../editTree/xml','../assets/range','../assets/resources'],function(require, exports, module) {
+define('emmet/utils/action',['require','exports','module','lodash','./common','./cssSections','../parser/abbreviation','../assets/htmlMatcher','../editTree/xml','../assets/range','../assets/resources'],function(require, exports, module) {
 	var _ = require('lodash');
 	var utils = require('./common');
+	var cssSections = require('./cssSections');
 	var abbreviationParser = require('../parser/abbreviation');
 	var htmlMatcher = require('../assets/htmlMatcher');
 	var xmlEditTree = require('../editTree/xml');
@@ -18002,18 +17915,14 @@ define('emmet/utils/action',['require','exports','module','lodash','./common','.
 		isXHTML: function(editor) {
 			return editor.getContent().search(/<!DOCTYPE[^>]+XHTML/i) != -1;
 		},
-		
+
 		/**
 		 * Check if current caret position is inside &lt;style&gt; tag
 		 * @param {IEmmetEditor} editor
-		 * @returns
+		 * @returns {Range} Inner range of &lt;style&gt; tag
 		 */
 		isStyle: function(editor) {
-			var content = String(editor.getContent());
-			var caretPos = editor.getCaretPos();
-			var tag = htmlMatcher.tag(content, caretPos);
-			return tag && tag.open.name.toLowerCase() == 'style' 
-				&& tag.innerRange.cmp(caretPos, 'lte', 'gte');
+			return !!cssSections.styleTagRange(editor.getContent(), editor.getCaretPos());
 		},
 
 		/**
@@ -18029,19 +17938,10 @@ define('emmet/utils/action',['require','exports','module','lodash','./common','.
 		 * Check if current caret position is inside "style" attribute of HTML
 		 * element
 		 * @param {IEmmetEditor} editor
-		 * @returns {Boolean}
+		 * @returns {Range} Inner range of style attribute
 		 */
 		isInlineCSS: function(editor) {
-			var content = String(editor.getContent());
-			var caretPos = editor.getCaretPos();
-			var tree = xmlEditTree.parseFromPosition(content, caretPos, true);
-			if (tree) {
-				var attr = tree.itemFromPosition(caretPos, true);
-				return attr && attr.name().toLowerCase() == 'style' 
-					&& attr.valueRange(true).cmp(caretPos, 'lte', 'gte');
-			}
-            
-            return false;
+			return !!cssSections.styleAttrRange(editor.getContent(), editor.getCaretPos());
 		}
 	};
 });
@@ -18924,6 +18824,918 @@ define('emmet/action/editPoints',['require','exports','module'],function(require
 		}
 	};
 });
+if (typeof module === 'object' && typeof define !== 'function') {
+	var define = function (factory) {
+		module.exports = factory(require, exports, module);
+	};
+}
+
+define('emmet/utils/math',['require','exports','module'],function(require, exports, module) {
+	/*
+	 Source: https://github.com/silentmatt/js-expression-eval
+
+	 Based on ndef.parser, by Raphael Graf(r@undefined.ch)
+	 http://www.undefined.ch/mparser/index.html
+
+	 Ported to JavaScript and modified by Matthew Crumley (email@matthewcrumley.com, http://silentmatt.com/)
+
+	 You are free to use and modify this code in anyway you find useful. Please leave this comment in the code
+	 to acknowledge its original source. If you feel like it, I enjoy hearing about projects that use my code,
+	 but don't feel like you have to let me know or ask permission.
+	*/
+
+	function object(o) {
+		function F() {}
+		F.prototype = o;
+		return new F();
+	}
+
+	var TNUMBER = 0;
+	var TOP1 = 1;
+	var TOP2 = 2;
+	var TVAR = 3;
+	var TFUNCALL = 4;
+
+	function Token(type_, index_, prio_, number_) {
+		this.type_ = type_;
+		this.index_ = index_ || 0;
+		this.prio_ = prio_ || 0;
+		this.number_ = (number_ !== undefined && number_ !== null) ? number_ : 0;
+		this.toString = function () {
+			switch (this.type_) {
+			case TNUMBER:
+				return this.number_;
+			case TOP1:
+			case TOP2:
+			case TVAR:
+				return this.index_;
+			case TFUNCALL:
+				return "CALL";
+			default:
+				return "Invalid Token";
+			}
+		};
+	}
+
+	function Expression(tokens, ops1, ops2, functions) {
+		this.tokens = tokens;
+		this.ops1 = ops1;
+		this.ops2 = ops2;
+		this.functions = functions;
+	}
+
+	// Based on http://www.json.org/json2.js
+    var cx = /[\u0000\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
+        escapable = /[\\\'\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
+        meta = {    // table of character substitutions
+            '\b': '\\b',
+            '\t': '\\t',
+            '\n': '\\n',
+            '\f': '\\f',
+            '\r': '\\r',
+            "'" : "\\'",
+            '\\': '\\\\'
+        };
+
+	function escapeValue(v) {
+		if (typeof v === "string") {
+			escapable.lastIndex = 0;
+	        return escapable.test(v) ?
+	            "'" + v.replace(escapable, function (a) {
+	                var c = meta[a];
+	                return typeof c === 'string' ? c :
+	                    '\\u' + ('0000' + a.charCodeAt(0).toString(16)).slice(-4);
+	            }) + "'" :
+	            "'" + v + "'";
+		}
+		return v;
+	}
+
+	Expression.prototype = {
+		simplify: function (values) {
+			values = values || {};
+			var nstack = [];
+			var newexpression = [];
+			var n1;
+			var n2;
+			var f;
+			var L = this.tokens.length;
+			var item;
+			var i = 0;
+			for (i = 0; i < L; i++) {
+				item = this.tokens[i];
+				var type_ = item.type_;
+				if (type_ === TNUMBER) {
+					nstack.push(item);
+				}
+				else if (type_ === TVAR && (item.index_ in values)) {
+					item = new Token(TNUMBER, 0, 0, values[item.index_]);
+					nstack.push(item);
+				}
+				else if (type_ === TOP2 && nstack.length > 1) {
+					n2 = nstack.pop();
+					n1 = nstack.pop();
+					f = this.ops2[item.index_];
+					item = new Token(TNUMBER, 0, 0, f(n1.number_, n2.number_));
+					nstack.push(item);
+				}
+				else if (type_ === TOP1 && nstack.length > 0) {
+					n1 = nstack.pop();
+					f = this.ops1[item.index_];
+					item = new Token(TNUMBER, 0, 0, f(n1.number_));
+					nstack.push(item);
+				}
+				else {
+					while (nstack.length > 0) {
+						newexpression.push(nstack.shift());
+					}
+					newexpression.push(item);
+				}
+			}
+			while (nstack.length > 0) {
+				newexpression.push(nstack.shift());
+			}
+
+			return new Expression(newexpression, object(this.ops1), object(this.ops2), object(this.functions));
+		},
+
+		substitute: function (variable, expr) {
+			if (!(expr instanceof Expression)) {
+				expr = new Parser().parse(String(expr));
+			}
+			var newexpression = [];
+			var L = this.tokens.length;
+			var item;
+			var i = 0;
+			for (i = 0; i < L; i++) {
+				item = this.tokens[i];
+				var type_ = item.type_;
+				if (type_ === TVAR && item.index_ === variable) {
+					for (var j = 0; j < expr.tokens.length; j++) {
+						var expritem = expr.tokens[j];
+						var replitem = new Token(expritem.type_, expritem.index_, expritem.prio_, expritem.number_);
+						newexpression.push(replitem);
+					}
+				}
+				else {
+					newexpression.push(item);
+				}
+			}
+
+			var ret = new Expression(newexpression, object(this.ops1), object(this.ops2), object(this.functions));
+			return ret;
+		},
+
+		evaluate: function (values) {
+			values = values || {};
+			var nstack = [];
+			var n1;
+			var n2;
+			var f;
+			var L = this.tokens.length;
+			var item;
+			var i = 0;
+			for (i = 0; i < L; i++) {
+				item = this.tokens[i];
+				var type_ = item.type_;
+				if (type_ === TNUMBER) {
+					nstack.push(item.number_);
+				}
+				else if (type_ === TOP2) {
+					n2 = nstack.pop();
+					n1 = nstack.pop();
+					f = this.ops2[item.index_];
+					nstack.push(f(n1, n2));
+				}
+				else if (type_ === TVAR) {
+					if (item.index_ in values) {
+						nstack.push(values[item.index_]);
+					}
+					else if (item.index_ in this.functions) {
+						nstack.push(this.functions[item.index_]);
+					}
+					else {
+						throw new Error("undefined variable: " + item.index_);
+					}
+				}
+				else if (type_ === TOP1) {
+					n1 = nstack.pop();
+					f = this.ops1[item.index_];
+					nstack.push(f(n1));
+				}
+				else if (type_ === TFUNCALL) {
+					n1 = nstack.pop();
+					f = nstack.pop();
+					if (f.apply && f.call) {
+						if (Object.prototype.toString.call(n1) == "[object Array]") {
+							nstack.push(f.apply(undefined, n1));
+						}
+						else {
+							nstack.push(f.call(undefined, n1));
+						}
+					}
+					else {
+						throw new Error(f + " is not a function");
+					}
+				}
+				else {
+					throw new Error("invalid Expression");
+				}
+			}
+			if (nstack.length > 1) {
+				throw new Error("invalid Expression (parity)");
+			}
+			return nstack[0];
+		},
+
+		toString: function (toJS) {
+			var nstack = [];
+			var n1;
+			var n2;
+			var f;
+			var L = this.tokens.length;
+			var item;
+			var i = 0;
+			for (i = 0; i < L; i++) {
+				item = this.tokens[i];
+				var type_ = item.type_;
+				if (type_ === TNUMBER) {
+					nstack.push(escapeValue(item.number_));
+				}
+				else if (type_ === TOP2) {
+					n2 = nstack.pop();
+					n1 = nstack.pop();
+					f = item.index_;
+					if (toJS && f == "^") {
+						nstack.push("Math.pow(" + n1 + "," + n2 + ")");
+					}
+					else {
+						nstack.push("(" + n1 + f + n2 + ")");
+					}
+				}
+				else if (type_ === TVAR) {
+					nstack.push(item.index_);
+				}
+				else if (type_ === TOP1) {
+					n1 = nstack.pop();
+					f = item.index_;
+					if (f === "-") {
+						nstack.push("(" + f + n1 + ")");
+					}
+					else {
+						nstack.push(f + "(" + n1 + ")");
+					}
+				}
+				else if (type_ === TFUNCALL) {
+					n1 = nstack.pop();
+					f = nstack.pop();
+					nstack.push(f + "(" + n1 + ")");
+				}
+				else {
+					throw new Error("invalid Expression");
+				}
+			}
+			if (nstack.length > 1) {
+				throw new Error("invalid Expression (parity)");
+			}
+			return nstack[0];
+		},
+
+		variables: function () {
+			var L = this.tokens.length;
+			var vars = [];
+			for (var i = 0; i < L; i++) {
+				var item = this.tokens[i];
+				if (item.type_ === TVAR && (vars.indexOf(item.index_) == -1)) {
+					vars.push(item.index_);
+				}
+			}
+
+			return vars;
+		},
+
+		toJSFunction: function (param, variables) {
+			var f = new Function(param, "with(Parser.values) { return " + this.simplify(variables).toString(true) + "; }");
+			return f;
+		}
+	};
+
+	function add(a, b) {
+		return Number(a) + Number(b);
+	}
+	function sub(a, b) {
+		return a - b; 
+	}
+	function mul(a, b) {
+		return a * b;
+	}
+	function div(a, b) {
+		return a / b;
+	}
+	function mod(a, b) {
+		return a % b;
+	}
+	function concat(a, b) {
+		return "" + a + b;
+	}
+
+	function neg(a) {
+		return -a;
+	}
+
+	function random(a) {
+		return Math.random() * (a || 1);
+	}
+	function fac(a) { //a!
+		a = Math.floor(a);
+		var b = a;
+		while (a > 1) {
+			b = b * (--a);
+		}
+		return b;
+	}
+
+	// TODO: use hypot that doesn't overflow
+	function pyt(a, b) {
+		return Math.sqrt(a * a + b * b);
+	}
+
+	function append(a, b) {
+		if (Object.prototype.toString.call(a) != "[object Array]") {
+			return [a, b];
+		}
+		a = a.slice();
+		a.push(b);
+		return a;
+	}
+
+	function Parser() {
+		this.success = false;
+		this.errormsg = "";
+		this.expression = "";
+
+		this.pos = 0;
+
+		this.tokennumber = 0;
+		this.tokenprio = 0;
+		this.tokenindex = 0;
+		this.tmpprio = 0;
+
+		this.ops1 = {
+			"sin": Math.sin,
+			"cos": Math.cos,
+			"tan": Math.tan,
+			"asin": Math.asin,
+			"acos": Math.acos,
+			"atan": Math.atan,
+			"sqrt": Math.sqrt,
+			"log": Math.log,
+			"abs": Math.abs,
+			"ceil": Math.ceil,
+			"floor": Math.floor,
+			"round": Math.round,
+			"-": neg,
+			"exp": Math.exp
+		};
+
+		this.ops2 = {
+			"+": add,
+			"-": sub,
+			"*": mul,
+			"/": div,
+			"%": mod,
+			"^": Math.pow,
+			",": append,
+			"||": concat
+		};
+
+		this.functions = {
+			"random": random,
+			"fac": fac,
+			"min": Math.min,
+			"max": Math.max,
+			"pyt": pyt,
+			"pow": Math.pow,
+			"atan2": Math.atan2
+		};
+
+		this.consts = {
+			"E": Math.E,
+			"PI": Math.PI
+		};
+	}
+
+	Parser.parse = function (expr) {
+		return new Parser().parse(expr);
+	};
+
+	Parser.evaluate = function (expr, variables) {
+		return Parser.parse(expr).evaluate(variables);
+	};
+
+	Parser.Expression = Expression;
+
+	Parser.values = {
+		sin: Math.sin,
+		cos: Math.cos,
+		tan: Math.tan,
+		asin: Math.asin,
+		acos: Math.acos,
+		atan: Math.atan,
+		sqrt: Math.sqrt,
+		log: Math.log,
+		abs: Math.abs,
+		ceil: Math.ceil,
+		floor: Math.floor,
+		round: Math.round,
+		random: random,
+		fac: fac,
+		exp: Math.exp,
+		min: Math.min,
+		max: Math.max,
+		pyt: pyt,
+		pow: Math.pow,
+		atan2: Math.atan2,
+		E: Math.E,
+		PI: Math.PI
+	};
+
+	var PRIMARY      = 1 << 0;
+	var OPERATOR     = 1 << 1;
+	var FUNCTION     = 1 << 2;
+	var LPAREN       = 1 << 3;
+	var RPAREN       = 1 << 4;
+	var COMMA        = 1 << 5;
+	var SIGN         = 1 << 6;
+	var CALL         = 1 << 7;
+	var NULLARY_CALL = 1 << 8;
+
+	Parser.prototype = {
+		parse: function (expr) {
+			this.errormsg = "";
+			this.success = true;
+			var operstack = [];
+			var tokenstack = [];
+			this.tmpprio = 0;
+			var expected = (PRIMARY | LPAREN | FUNCTION | SIGN);
+			var noperators = 0;
+			this.expression = expr;
+			this.pos = 0;
+
+			while (this.pos < this.expression.length) {
+				if (this.isOperator()) {
+					if (this.isSign() && (expected & SIGN)) {
+						if (this.isNegativeSign()) {
+							this.tokenprio = 2;
+							this.tokenindex = "-";
+							noperators++;
+							this.addfunc(tokenstack, operstack, TOP1);
+						}
+						expected = (PRIMARY | LPAREN | FUNCTION | SIGN);
+					}
+					else if (this.isComment()) {
+
+					}
+					else {
+						if ((expected & OPERATOR) === 0) {
+							this.error_parsing(this.pos, "unexpected operator");
+						}
+						noperators += 2;
+						this.addfunc(tokenstack, operstack, TOP2);
+						expected = (PRIMARY | LPAREN | FUNCTION | SIGN);
+					}
+				}
+				else if (this.isNumber()) {
+					if ((expected & PRIMARY) === 0) {
+						this.error_parsing(this.pos, "unexpected number");
+					}
+					var token = new Token(TNUMBER, 0, 0, this.tokennumber);
+					tokenstack.push(token);
+
+					expected = (OPERATOR | RPAREN | COMMA);
+				}
+				else if (this.isString()) {
+					if ((expected & PRIMARY) === 0) {
+						this.error_parsing(this.pos, "unexpected string");
+					}
+					var token = new Token(TNUMBER, 0, 0, this.tokennumber);
+					tokenstack.push(token);
+
+					expected = (OPERATOR | RPAREN | COMMA);
+				}
+				else if (this.isLeftParenth()) {
+					if ((expected & LPAREN) === 0) {
+						this.error_parsing(this.pos, "unexpected \"(\"");
+					}
+
+					if (expected & CALL) {
+						noperators += 2;
+						this.tokenprio = -2;
+						this.tokenindex = -1;
+						this.addfunc(tokenstack, operstack, TFUNCALL);
+					}
+
+					expected = (PRIMARY | LPAREN | FUNCTION | SIGN | NULLARY_CALL);
+				}
+				else if (this.isRightParenth()) {
+				    if (expected & NULLARY_CALL) {
+						var token = new Token(TNUMBER, 0, 0, []);
+						tokenstack.push(token);
+					}
+					else if ((expected & RPAREN) === 0) {
+						this.error_parsing(this.pos, "unexpected \")\"");
+					}
+
+					expected = (OPERATOR | RPAREN | COMMA | LPAREN | CALL);
+				}
+				else if (this.isComma()) {
+					if ((expected & COMMA) === 0) {
+						this.error_parsing(this.pos, "unexpected \",\"");
+					}
+					this.addfunc(tokenstack, operstack, TOP2);
+					noperators += 2;
+					expected = (PRIMARY | LPAREN | FUNCTION | SIGN);
+				}
+				else if (this.isConst()) {
+					if ((expected & PRIMARY) === 0) {
+						this.error_parsing(this.pos, "unexpected constant");
+					}
+					var consttoken = new Token(TNUMBER, 0, 0, this.tokennumber);
+					tokenstack.push(consttoken);
+					expected = (OPERATOR | RPAREN | COMMA);
+				}
+				else if (this.isOp2()) {
+					if ((expected & FUNCTION) === 0) {
+						this.error_parsing(this.pos, "unexpected function");
+					}
+					this.addfunc(tokenstack, operstack, TOP2);
+					noperators += 2;
+					expected = (LPAREN);
+				}
+				else if (this.isOp1()) {
+					if ((expected & FUNCTION) === 0) {
+						this.error_parsing(this.pos, "unexpected function");
+					}
+					this.addfunc(tokenstack, operstack, TOP1);
+					noperators++;
+					expected = (LPAREN);
+				}
+				else if (this.isVar()) {
+					if ((expected & PRIMARY) === 0) {
+						this.error_parsing(this.pos, "unexpected variable");
+					}
+					var vartoken = new Token(TVAR, this.tokenindex, 0, 0);
+					tokenstack.push(vartoken);
+
+					expected = (OPERATOR | RPAREN | COMMA | LPAREN | CALL);
+				}
+				else if (this.isWhite()) {
+				}
+				else {
+					if (this.errormsg === "") {
+						this.error_parsing(this.pos, "unknown character");
+					}
+					else {
+						this.error_parsing(this.pos, this.errormsg);
+					}
+				}
+			}
+			if (this.tmpprio < 0 || this.tmpprio >= 10) {
+				this.error_parsing(this.pos, "unmatched \"()\"");
+			}
+			while (operstack.length > 0) {
+				var tmp = operstack.pop();
+				tokenstack.push(tmp);
+			}
+			if (noperators + 1 !== tokenstack.length) {
+				//print(noperators + 1);
+				//print(tokenstack);
+				this.error_parsing(this.pos, "parity");
+			}
+
+			return new Expression(tokenstack, object(this.ops1), object(this.ops2), object(this.functions));
+		},
+
+		evaluate: function (expr, variables) {
+			return this.parse(expr).evaluate(variables);
+		},
+
+		error_parsing: function (column, msg) {
+			this.success = false;
+			this.errormsg = "parse error [column " + (column) + "]: " + msg;
+			throw new Error(this.errormsg);
+		},
+
+//\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
+
+		addfunc: function (tokenstack, operstack, type_) {
+			var operator = new Token(type_, this.tokenindex, this.tokenprio + this.tmpprio, 0);
+			while (operstack.length > 0) {
+				if (operator.prio_ <= operstack[operstack.length - 1].prio_) {
+					tokenstack.push(operstack.pop());
+				}
+				else {
+					break;
+				}
+			}
+			operstack.push(operator);
+		},
+
+		isNumber: function () {
+			var r = false;
+			var str = "";
+			while (this.pos < this.expression.length) {
+				var code = this.expression.charCodeAt(this.pos);
+				if ((code >= 48 && code <= 57) || code === 46) {
+					str += this.expression.charAt(this.pos);
+					this.pos++;
+					this.tokennumber = parseFloat(str);
+					r = true;
+				}
+				else {
+					break;
+				}
+			}
+			return r;
+		},
+
+		// Ported from the yajjl JSON parser at http://code.google.com/p/yajjl/
+		unescape: function(v, pos) {
+			var buffer = [];
+			var escaping = false;
+
+			for (var i = 0; i < v.length; i++) {
+				var c = v.charAt(i);
+	
+				if (escaping) {
+					switch (c) {
+					case "'":
+						buffer.push("'");
+						break;
+					case '\\':
+						buffer.push('\\');
+						break;
+					case '/':
+						buffer.push('/');
+						break;
+					case 'b':
+						buffer.push('\b');
+						break;
+					case 'f':
+						buffer.push('\f');
+						break;
+					case 'n':
+						buffer.push('\n');
+						break;
+					case 'r':
+						buffer.push('\r');
+						break;
+					case 't':
+						buffer.push('\t');
+						break;
+					case 'u':
+						// interpret the following 4 characters as the hex of the unicode code point
+						var codePoint = parseInt(v.substring(i + 1, i + 5), 16);
+						buffer.push(String.fromCharCode(codePoint));
+						i += 4;
+						break;
+					default:
+						throw this.error_parsing(pos + i, "Illegal escape sequence: '\\" + c + "'");
+					}
+					escaping = false;
+				} else {
+					if (c == '\\') {
+						escaping = true;
+					} else {
+						buffer.push(c);
+					}
+				}
+			}
+	
+			return buffer.join('');
+		},
+
+		isString: function () {
+			var r = false;
+			var str = "";
+			var startpos = this.pos;
+			if (this.pos < this.expression.length && this.expression.charAt(this.pos) == "'") {
+				this.pos++;
+				while (this.pos < this.expression.length) {
+					var code = this.expression.charAt(this.pos);
+					if (code != "'" || str.slice(-1) == "\\") {
+						str += this.expression.charAt(this.pos);
+						this.pos++;
+					}
+					else {
+						this.pos++;
+						this.tokennumber = this.unescape(str, startpos);
+						r = true;
+						break;
+					}
+				}
+			}
+			return r;
+		},
+
+		isConst: function () {
+			var str;
+			for (var i in this.consts) {
+				if (true) {
+					var L = i.length;
+					str = this.expression.substr(this.pos, L);
+					if (i === str) {
+						this.tokennumber = this.consts[i];
+						this.pos += L;
+						return true;
+					}
+				}
+			}
+			return false;
+		},
+
+		isOperator: function () {
+			var code = this.expression.charCodeAt(this.pos);
+			if (code === 43) { // +
+				this.tokenprio = 0;
+				this.tokenindex = "+";
+			}
+			else if (code === 45) { // -
+				this.tokenprio = 0;
+				this.tokenindex = "-";
+			}
+			else if (code === 124) { // |
+				if (this.expression.charCodeAt(this.pos + 1) === 124) {
+					this.pos++;
+					this.tokenprio = 0;
+					this.tokenindex = "||";
+				}
+				else {
+					return false;
+				}
+			}
+			else if (code === 42) { // *
+				this.tokenprio = 1;
+				this.tokenindex = "*";
+			}
+			else if (code === 47) { // /
+				this.tokenprio = 2;
+				this.tokenindex = "/";
+			}
+			else if (code === 37) { // %
+				this.tokenprio = 2;
+				this.tokenindex = "%";
+			}
+			else if (code === 94) { // ^
+				this.tokenprio = 3;
+				this.tokenindex = "^";
+			}
+			else {
+				return false;
+			}
+			this.pos++;
+			return true;
+		},
+
+		isSign: function () {
+			var code = this.expression.charCodeAt(this.pos - 1);
+			if (code === 45 || code === 43) { // -
+				return true;
+			}
+			return false;
+		},
+
+		isPositiveSign: function () {
+			var code = this.expression.charCodeAt(this.pos - 1);
+			if (code === 43) { // -
+				return true;
+			}
+			return false;
+		},
+
+		isNegativeSign: function () {
+			var code = this.expression.charCodeAt(this.pos - 1);
+			if (code === 45) { // -
+				return true;
+			}
+			return false;
+		},
+
+		isLeftParenth: function () {
+			var code = this.expression.charCodeAt(this.pos);
+			if (code === 40) { // (
+				this.pos++;
+				this.tmpprio += 10;
+				return true;
+			}
+			return false;
+		},
+
+		isRightParenth: function () {
+			var code = this.expression.charCodeAt(this.pos);
+			if (code === 41) { // )
+				this.pos++;
+				this.tmpprio -= 10;
+				return true;
+			}
+			return false;
+		},
+
+		isComma: function () {
+			var code = this.expression.charCodeAt(this.pos);
+			if (code === 44) { // ,
+				this.pos++;
+				this.tokenprio = -1;
+				this.tokenindex = ",";
+				return true;
+			}
+			return false;
+		},
+
+		isWhite: function () {
+			var code = this.expression.charCodeAt(this.pos);
+			if (code === 32 || code === 9 || code === 10 || code === 13) {
+				this.pos++;
+				return true;
+			}
+			return false;
+		},
+
+		isOp1: function () {
+			var str = "";
+			for (var i = this.pos; i < this.expression.length; i++) {
+				var c = this.expression.charAt(i);
+				if (c.toUpperCase() === c.toLowerCase()) {
+					if (i === this.pos || (c != '_' && (c < '0' || c > '9'))) {
+						break;
+					}
+				}
+				str += c;
+			}
+			if (str.length > 0 && (str in this.ops1)) {
+				this.tokenindex = str;
+				this.tokenprio = 5;
+				this.pos += str.length;
+				return true;
+			}
+			return false;
+		},
+
+		isOp2: function () {
+			var str = "";
+			for (var i = this.pos; i < this.expression.length; i++) {
+				var c = this.expression.charAt(i);
+				if (c.toUpperCase() === c.toLowerCase()) {
+					if (i === this.pos || (c != '_' && (c < '0' || c > '9'))) {
+						break;
+					}
+				}
+				str += c;
+			}
+			if (str.length > 0 && (str in this.ops2)) {
+				this.tokenindex = str;
+				this.tokenprio = 5;
+				this.pos += str.length;
+				return true;
+			}
+			return false;
+		},
+
+		isVar: function () {
+			var str = "";
+			for (var i = this.pos; i < this.expression.length; i++) {
+				var c = this.expression.charAt(i);
+				if (c.toUpperCase() === c.toLowerCase()) {
+					if (i === this.pos || (c != '_' && (c < '0' || c > '9'))) {
+						break;
+					}
+				}
+				str += c;
+			}
+			if (str.length > 0) {
+				this.tokenindex = str;
+				this.tokenprio = 4;
+				this.pos += str.length;
+				return true;
+			}
+			return false;
+		},
+
+		isComment: function () {
+			var code = this.expression.charCodeAt(this.pos - 1);
+			if (code === 47 && this.expression.charCodeAt(this.pos) === 42) {
+				this.pos = this.expression.indexOf("*/", this.pos) + 2;
+				if (this.pos === 1) {
+					this.pos = this.expression.length;
+				}
+				return true;
+			}
+			return false;
+		}
+	};
+
+	return Parser;
+});
 /**
  * Evaluates simple math expression under caret
  */
@@ -18933,9 +19745,10 @@ if (typeof module === 'object' && typeof define !== 'function') {
 	};
 }
 
-define('emmet/action/evaluateMath',['require','exports','module','../utils/action','../utils/common','../assets/range'],function(require, exports, module) {
+define('emmet/action/evaluateMath',['require','exports','module','../utils/action','../utils/common','../utils/math','../assets/range'],function(require, exports, module) {
 	var actionUtils = require('../utils/action');
 	var utils = require('../utils/common');
+	var math = require('../utils/math');
 	var range = require('../assets/range');
 
 	return {
@@ -18945,7 +19758,7 @@ define('emmet/action/evaluateMath',['require','exports','module','../utils/actio
 		 * @return {Boolean}
 		 */
 		evaluateMathAction: function(editor) {
-			var content = String(editor.getContent());
+			var content = editor.getContent();
 			var chars = '.+-*/\\';
 			
 			/** @type Range */
@@ -18960,10 +19773,10 @@ define('emmet/action/evaluateMath',['require','exports','module','../utils/actio
 				var expr = sel.substring(content);
 				
 				// replace integral division: 11\2 => Math.round(11/2) 
-				expr = expr.replace(/([\d\.\-]+)\\([\d\.\-]+)/g, 'Math.round($1/$2)');
+				expr = expr.replace(/([\d\.\-]+)\\([\d\.\-]+)/g, 'round($1/$2)');
 				
 				try {
-					var result = utils.prettifyNumber(new Function('return ' + expr)());
+					var result = utils.prettifyNumber(math.evaluate(expr));
 					editor.replaceContent(result, sel.start, sel.end);
 					editor.setCaretPos(sel.start + result.length);
 					return true;
@@ -21225,9 +22038,11 @@ define('emmet/action/selectItem',['require','exports','module','lodash','../asse
 		}
 
 		// return range next to caret
-		r = _.find(ranges, function(item) {
-			return item.end > selRange.start;
-		});
+		var test = 
+		r = _.find(ranges, isBackward 
+			? function(item) {return item.end < selRange.start;}
+			: function(item) {return item.end > selRange.start;}
+		);
 
 		if (!r) {
 			// can’t find anything, just pick first one
@@ -22183,10 +22998,10 @@ if (typeof module === 'object' && typeof define !== 'function') {
 	};
 }
 
-define('emmet/emmet',['require','exports','module','lodash','./utils/common','./action/main','./parser/abbreviation','./plugin/file','./assets/preferences','./assets/resources','./assets/profile','./assets/caniuse','./assets/logger'],function(require, exports, module) {
+define('emmet/emmet',['require','exports','module','./utils/common','./action/main','./parser/abbreviation','./plugin/file','./assets/preferences','./assets/resources','./assets/profile','./assets/caniuse','./assets/logger'],function(require, exports, module) {
 	var global = typeof self != 'undefined' ? self : this;
 
-	var _ = require('lodash');
+	// var _ = require('lodash');
 	var utils = require('./utils/common');
 	var actions = require('./action/main');
 	var parser = require('./parser/abbreviation');
@@ -22286,9 +23101,14 @@ define('emmet/emmet',['require','exports','module','lodash','./utils/common','./
 			var payload = {};
 			var userSnippets = null;
 			var that = this;
-			
+
+			// make sure file list contians only valid extension files
+			fileList = _.filter(fileList, function(f) {
+				var ext = file.getExt(f);
+				return ext === 'json' || ext === 'js';
+			});
+
 			var reader = _.bind(file.readText || file.read, file);
-			
 			var next = function() {
 				if (fileList.length) {
 					var f = fileList.shift();
@@ -23538,25128 +24358,4 @@ define('plugin',['./editor', 'emmet/emmet'], function(editor, emmet) {
 		"extends": "stylus"
 	}
 }
-,caniuse: {
-	"eras": {
-		"e-26": "26 versions back",
-		"e-25": "25 versions back",
-		"e-24": "24 versions back",
-		"e-23": "23 versions back",
-		"e-22": "22 versions back",
-		"e-21": "21 versions back",
-		"e-20": "20 versions back",
-		"e-19": "19 versions back",
-		"e-18": "18 versions back",
-		"e-17": "17 versions back",
-		"e-16": "16 versions back",
-		"e-15": "15 versions back",
-		"e-14": "14 versions back",
-		"e-13": "13 versions back",
-		"e-12": "12 versions back",
-		"e-11": "11 versions back",
-		"e-10": "10 versions back",
-		"e-9": "9 versions back",
-		"e-8": "8 versions back",
-		"e-7": "7 versions back",
-		"e-6": "6 versions back",
-		"e-5": "5 versions back",
-		"e-4": "4 versions back",
-		"e-3": "3 versions back",
-		"e-2": "2 versions back",
-		"e-1": "Previous version",
-		"e0": "Current",
-		"e1": "Near future",
-		"e2": "Farther future"
-	},
-	"agents": {
-		"ie": {
-			"browser": "IE",
-			"abbr": "IE",
-			"prefix": "ms",
-			"type": "desktop",
-			"usage_global": {
-				"10": 10.7866,
-				"11": 0.114751,
-				"5.5": 0.009298,
-				"6": 0.204912,
-				"7": 0.508182,
-				"8": 8.31124,
-				"9": 5.21297
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "5.5", "6", "7", "8", "9", "10", "11", null, null],
-			"current_version": ""
-		},
-		"firefox": {
-			"browser": "Firefox",
-			"abbr": "FF",
-			"prefix": "moz",
-			"type": "desktop",
-			"usage_global": {
-				"10": 0.112406,
-				"11": 0.088319,
-				"12": 0.208754,
-				"13": 0.096348,
-				"14": 0.096348,
-				"15": 0.136493,
-				"16": 0.264957,
-				"17": 0.192696,
-				"18": 0.112406,
-				"19": 0.128464,
-				"2": 0.016058,
-				"20": 0.16058,
-				"21": 0.216783,
-				"22": 0.256928,
-				"23": 0.907277,
-				"24": 11.0318,
-				"25": 0.529914,
-				"26": 0.016058,
-				"27": 0.016058,
-				"3": 0.088319,
-				"3.5": 0.040145,
-				"3.6": 0.305102,
-				"4": 0.072261,
-				"5": 0.048174,
-				"6": 0.048174,
-				"7": 0.040145,
-				"8": 0.072261,
-				"9": 0.056203
-			},
-			"versions": [null, "2", "3", "3.5", "3.6", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27"],
-			"current_version": ""
-		},
-		"chrome": {
-			"browser": "Chrome",
-			"abbr": "Chr.",
-			"prefix": "webkit",
-			"type": "desktop",
-			"usage_global": {
-				"10": 0.048174,
-				"11": 0.112406,
-				"12": 0.064232,
-				"13": 0.056203,
-				"14": 0.056203,
-				"15": 0.072261,
-				"16": 0.048174,
-				"17": 0.040145,
-				"18": 0.08029,
-				"19": 0.040145,
-				"20": 0.040145,
-				"21": 0.48174,
-				"22": 0.248899,
-				"23": 0.216783,
-				"24": 0.200725,
-				"25": 0.361305,
-				"26": 0.353276,
-				"27": 0.369334,
-				"28": 0.610204,
-				"29": 5.08236,
-				"30": 24.6089,
-				"31": 0.16058,
-				"32": 0.064232,
-				"4": 0.024087,
-				"5": 0.024087,
-				"6": 0.032116,
-				"7": 0.024087,
-				"8": 0.032116,
-				"9": 0.024087
-			},
-			"versions": ["4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32"],
-			"current_version": ""
-		},
-		"safari": {
-			"browser": "Safari",
-			"abbr": "Saf.",
-			"prefix": "webkit",
-			"type": "desktop",
-			"usage_global": {
-				"3.1": 0,
-				"3.2": 0.008692,
-				"4": 0.104377,
-				"5": 0.305102,
-				"5.1": 1.28464,
-				"6": 2.04739,
-				"6.1": 0.064232,
-				"7": 0.16058
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "3.1", "3.2", "4", "5", "5.1", "6", "6.1", "7", null, null],
-			"current_version": ""
-		},
-		"opera": {
-			"browser": "Opera",
-			"abbr": "Op.",
-			"prefix": "o",
-			"type": "desktop",
-			"usage_global": {
-				"10.0-10.1": 0.016058,
-				"10.5": 0.008392,
-				"10.6": 0.008029,
-				"11": 0.008219,
-				"11.1": 0.008219,
-				"11.5": 0.016058,
-				"11.6": 0.032116,
-				"12": 0.040145,
-				"12.1": 0.48174,
-				"15": 0.032116,
-				"16": 0.104377,
-				"17": 0.16058,
-				"18": 0,
-				"9.5-9.6": 0.008219
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, "9.5-9.6", "10.0-10.1", "10.5", "10.6", "11", "11.1", "11.5", "11.6", "12", "12.1", "15", "16", "17", "18", null],
-			"current_version": "",
-			"prefix_exceptions": {
-				"15": "webkit",
-				"16": "webkit",
-				"17": "webkit",
-				"18": "webkit"
-			}
-		},
-		"ios_saf": {
-			"browser": "iOS Safari",
-			"abbr": "iOS",
-			"prefix": "webkit",
-			"type": "mobile",
-			"usage_global": {
-				"3.2": 0.00400113,
-				"4.0-4.1": 0.00800226,
-				"4.2-4.3": 0.0280079,
-				"5.0-5.1": 0.28408,
-				"6.0-6.1": 1.15633,
-				"7.0": 2.52071
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "3.2", "4.0-4.1", "4.2-4.3", "5.0-5.1", "6.0-6.1", "7.0", null, null],
-			"current_version": ""
-		},
-		"op_mini": {
-			"browser": "Opera Mini",
-			"abbr": "O.Mini",
-			"prefix": "o",
-			"type": "mobile",
-			"usage_global": {
-				"5.0-7.0": 4.58374
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "5.0-7.0", null, null],
-			"current_version": ""
-		},
-		"android": {
-			"browser": "Android Browser",
-			"abbr": "And.",
-			"prefix": "webkit",
-			"type": "mobile",
-			"usage_global": {
-				"2.1": 0.0251229,
-				"2.2": 0.0854178,
-				"2.3": 1.32146,
-				"3": 0.00502458,
-				"4": 0.994867,
-				"4.1": 1.87417,
-				"4.2-4.3": 0.743638,
-				"4.4": 0
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "2.1", "2.2", "2.3", "3", "4", "4.1", "4.2-4.3", "4.4", null],
-			"current_version": ""
-		},
-		"op_mob": {
-			"browser": "Opera Mobile",
-			"abbr": "O.Mob",
-			"prefix": "o",
-			"type": "mobile",
-			"usage_global": {
-				"0": 0,
-				"10": 0,
-				"11.5": 0.00726525,
-				"12": 0.0363263,
-				"12.1": 0.101714
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "10", null, null, "11.5", "12", "12.1", "0", null, null],
-			"current_version": "16",
-			"prefix_exceptions": {
-				"0": "webkit"
-			}
-		},
-		"bb": {
-			"browser": "Blackberry Browser",
-			"abbr": "BB",
-			"prefix": "webkit",
-			"type": "mobile",
-			"usage_global": {
-				"10": 0,
-				"7": 0.141419
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "7", "10", null, null],
-			"current_version": ""
-		},
-		"and_chr": {
-			"browser": "Chrome for Android",
-			"abbr": "Chr/And.",
-			"prefix": "webkit",
-			"type": "mobile",
-			"usage_global": {
-				"0": 1.38176
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "0", null, null],
-			"current_version": "30"
-		},
-		"and_ff": {
-			"browser": "Firefox for Android",
-			"abbr": "FF/And.",
-			"prefix": "moz",
-			"type": "mobile",
-			"usage_global": {
-				"0": 0.070956
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "0", null, null],
-			"current_version": "25"
-		},
-		"ie_mob": {
-			"browser": "IE Mobile",
-			"abbr": "IE.Mob",
-			"prefix": "ms",
-			"type": "mobile",
-			"usage_global": {
-				"10": 0.205595
-			},
-			"versions": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "10", null, null],
-			"current_version": ""
-		}
-	},
-	"statuses": {
-		"rec": "Recommendation",
-		"pr": "Proposed Recommendation",
-		"cr": "Candidate Recommendation",
-		"wd": "Working Draft",
-		"other": "Other",
-		"unoff": "Unofficial / Note"
-	},
-	"cats": {
-		"CSS": ["CSS", "CSS2", "CSS3"],
-		"HTML5": ["Canvas", "HTML5"],
-		"JS API": ["JS API"],
-		"Other": ["PNG", "Other", "DOM"],
-		"SVG": ["SVG"]
-	},
-	"updated": 1383587152,
-	"data": {
-		"png-alpha": {
-			"title": "PNG alpha transparency",
-			"description": "Semi-transparent areas in PNG files",
-			"spec": "http://www.w3.org/TR/PNG/",
-			"status": "rec",
-			"links": [{
-				"url": "http://dillerdesign.com/experiment/DD_belatedPNG/",
-				"title": "Workaround for IE6"
-			}, {
-				"url": "http://en.wikipedia.org/wiki/Portable_Network_Graphics",
-				"title": "Wikipedia"
-			}],
-			"categories": ["PNG"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "IE6 does support full transparency in 8-bit PNGs, which can sometimes be an alternative to 24-bit PNGs.",
-			"usage_perc_y": 94.36,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"apng": {
-			"title": "Animated PNG (APNG)",
-			"description": "Like animated GIFs, but allowing 24-bit colors and alpha transparency",
-			"spec": "https://wiki.mozilla.org/APNG_Specification",
-			"status": "unoff",
-			"links": [{
-				"url": "http://en.wikipedia.org/wiki/APNG",
-				"title": "Wikipedia"
-			}, {
-				"url": "https://github.com/davidmz/apng-canvas",
-				"title": "Polyfill using canvas"
-			}, {
-				"url": "https://chrome.google.com/webstore/detail/ehkepjiconegkhpodgoaeamnpckdbblp",
-				"title": "Chrome extension providing support"
-			}, {
-				"url": "http://www.truekolor.net/learn-how-to-create-an-animated-png/",
-				"title": "APNG tutorial"
-			}],
-			"categories": ["PNG"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "n",
-					"31": "n",
-					"32": "n"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Where support for APNG is missing, only the first frame is displayed",
-			"usage_perc_y": 16.19,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"video": {
-			"title": "Video element",
-			"description": "Method of playing videos on webpages (without requiring a plug-in)",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/video.html#video",
-			"status": "wd",
-			"links": [{
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/video.js#video",
-				"title": "has.js test"
-			}, {
-				"url": "http://webmproject.org",
-				"title": "WebM format information"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/elements/video",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://camendesign.co.uk/code/video_for_everybody",
-				"title": "Video for Everybody"
-			}, {
-				"url": "http://diveinto.org/html5/video.html",
-				"title": "Video on the Web - includes info on Android support"
-			}, {
-				"url": "http://dev.opera.com/articles/view/everything-you-need-to-know-about-html5-video-and-audio/",
-				"title": "Detailed article on video/audio elements"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a",
-					"2.2": "a",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Different browsers have support for different video formats, see sub-features for details. \r\n\r\nThe Android browser (before 2.3) requires <a href=\"http://www.broken-links.com/2010/07/08/making-html5-video-work-on-android-phones/\">specific handling</a> to run the video element.",
-			"usage_perc_y": 80.71,
-			"usage_perc_a": 0.11,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "<video>"
-		},
-		"audio": {
-			"title": "Audio element",
-			"description": "Method of playing sound on webpages (without requiring a plug-in)",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/video.html#audio",
-			"status": "wd",
-			"links": [{
-				"url": "http://html5doctor.com/native-audio-in-the-browser/",
-				"title": "HTML5 Doctor article"
-			}, {
-				"url": "http://textopia.org/androidsoundformats.html",
-				"title": "File format test page"
-			}, {
-				"url": "http://www.jplayer.org/latest/demos/",
-				"title": "Demos of audio player that uses &lt;audio>"
-			}, {
-				"url": "http://www.phoboslab.org/log/2011/03/the-state-of-html5-audio",
-				"title": "The State of HTML5 Audio"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/audio.js#audio",
-				"title": "has.js test"
-			}, {
-				"url": "http://dev.opera.com/articles/view/everything-you-need-to-know-about-html5-video-and-audio/",
-				"title": "Detailed article on video/audio elements"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/elements/audio",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://24ways.org/2010/the-state-of-html5-audio",
-				"title": "Detailed article on support"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "a",
-					"10.0-10.1": "a",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 80.7,
-			"usage_perc_a": 0.02,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"contenteditable": {
-			"title": "contenteditable attribute (basic support)",
-			"description": "Method of making any HTML element editable",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/editing.html#contenteditable",
-			"status": "wd",
-			"links": [{
-				"url": "http://accessgarage.wordpress.com/2009/05/08/how-to-hack-your-app-to-make-contenteditable-work/",
-				"title": "Blog post on usage problems"
-			}, {
-				"url": "http://html5demos.com/contenteditable",
-				"title": "Demo page"
-			}, {
-				"url": "http://blog.whatwg.org/the-road-to-html-5-contenteditable",
-				"title": "WHATWG blog post"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/attributes/contentEditable",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "a",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "This support only refers to very basic editing capability, implementations vary significantly on how certain elements can be edited.",
-			"usage_perc_y": 88.37,
-			"usage_perc_a": 0.09,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"dragndrop": {
-			"title": "Drag and Drop",
-			"description": "Method of easily dragging and dropping elements on a page, requiring minimal JavaScript.",
-			"spec": "http://www.w3.org/TR/html5/editing.html#dnd",
-			"status": "wd",
-			"links": [{
-				"url": "http://html5demos.com/drag",
-				"title": "Demo with link blocks"
-			}, {
-				"url": "http://html5doctor.com/native-drag-and-drop/",
-				"title": "HTML5 Doctor article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/dom/events/drag",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://nettutsplus.s3.amazonaws.com/64_html5dragdrop/demo/index.html",
-				"title": "Shopping cart demo"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "p",
-					"9.5-9.6": "p",
-					"10.0-10.1": "p",
-					"10.5": "p",
-					"10.6": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"11.6": "p",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"12": "p",
-					"12.1": "y",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support in older IE refers to no support for the dataTransfer.files or .types objects and limited supported formats for dataTransfer.setData/getData.",
-			"usage_perc_y": 64.83,
-			"usage_perc_a": 14.25,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "draganddrop"
-		},
-		"queryselector": {
-			"title": "querySelector/querySelectorAll",
-			"description": "Method of accessing DOM elements using CSS selectors",
-			"spec": "http://www.w3.org/TR/selectors-api/",
-			"status": "rec",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/selectors_api/querySelector",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://cjihrig.com/blog/javascripts-selectors-api/",
-				"title": "Blog post"
-			}, {
-				"url": "https://developer.mozilla.org/En/DOM/Element.querySelectorAll",
-				"title": "MDN article on querySelectorAll"
-			}, {
-				"url": "https://developer.mozilla.org/en/DOM/element.querySelector",
-				"title": "MDN article on querySelector"
-			}],
-			"categories": ["DOM"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "p",
-					"9.5-9.6": "p",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Only works for the CSS selectors available. Thus the IE8 implementation is limited to the CSS 2.1 selectors",
-			"usage_perc_y": 93.74,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "query,selectors,selectors api"
-		},
-		"getelementsbyclassname": {
-			"title": "getElementsByClassName",
-			"description": "Method of accessing DOM elements by class name",
-			"spec": "http://www.w3.org/TR/dom/#dom-document-getelementsbyclassname",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.quirksmode.org/dom/tests/basics.html#getElementsByClassName",
-				"title": "Test page"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/dom/methods/getElementsByClassName",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["DOM", "HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 85.52,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "byclassname"
-		},
-		"forms": {
-			"title": "HTML5 form features",
-			"description": "Expanded form options, including things like date pickers, sliders, validation, placeholders and multiple file uploads. Previously known as \"Web forms 2.0\".",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/forms.html",
-			"status": "wd",
-			"links": [{
-				"url": "https://github.com/westonruter/webforms2",
-				"title": "Cross-browser JS implementation (based on original spec)"
-			}, {
-				"url": "http://www.miketaylr.com/code/input-type-attr.html",
-				"title": "HTML5 inputs and attribute support page"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "p",
-					"3.6": "p",
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a",
-					"28": "a",
-					"29": "a",
-					"30": "a",
-					"31": "a",
-					"32": "a"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "a",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "a",
-					"4.2-4.3": "a",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "a"
-				},
-				"bb": {
-					"7": "n",
-					"10": "a"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "a"
-				},
-				"and_chr": {
-					"0": "a"
-				},
-				"and_ff": {
-					"0": "a"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 4.75,
-			"usage_perc_a": 65.35,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "input,datepicker"
-		},
-		"html5semantic": {
-			"title": "New semantic elements",
-			"description": "HTML5 offers some new elements, primarily for semantic purposes. The elements include: section, article, aside, header, footer, nav, figure, figcaption, time, mark.",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/semantics.html#sections",
-			"status": "wd",
-			"links": [{
-				"url": "http://oli.jp/2009/html5-structure3/",
-				"title": "Article on structural elements"
-			}, {
-				"url": "http://blog.whatwg.org/supporting-new-elements-in-ie",
-				"title": "Workaround for IE"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/dom.js#dom-html5-elements",
-				"title": "has.js test"
-			}, {
-				"url": "http://blog.whatwg.org/styling-ie-noscript",
-				"title": "Alternate workaround"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "a",
-					"3.5": "a",
-					"3.6": "a",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "a",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a",
-					"3.2": "a",
-					"4": "a",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "a",
-					"9.5-9.6": "a",
-					"10.0-10.1": "a",
-					"10.5": "a",
-					"10.6": "a",
-					"11": "a",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "a"
-				},
-				"android": {
-					"2.1": "a",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "a",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support refers to missing the default styling. This is easily taken care of by using display:block for all new elements (except time and mark, these should be display:inline anyway).",
-			"usage_perc_y": 80.26,
-			"usage_perc_a": 5.26,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"offline-apps": {
-			"title": "Offline web applications",
-			"description": "Method of defining web page files to be cached using a cache manifest file, allowing them to work offline on subsequent visits to the page",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/offline.html",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.sitepoint.com/offline-web-application-tutorial/",
-				"title": "Sitepoint tutorial"
-			}, {
-				"url": "http://diveinto.org/html5/offline.html",
-				"title": "Dive Into HTML5 article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/appcache/ApplicationCache",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://hacks.mozilla.org/2010/01/offline-web-applications/",
-				"title": "Mozilla Hacks article/demo"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "a",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "p",
-					"10.5": "p",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 75.59,
-			"usage_perc_a": 0.09,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "appcache,app cache,application cache,online"
-		},
-		"webworkers": {
-			"title": "Web Workers",
-			"description": "Method of running scripts in the background, isolated from the web page",
-			"spec": "http://www.w3.org/TR/workers/",
-			"status": "cr",
-			"links": [{
-				"url": "http://code.google.com/p/ie-web-worker/",
-				"title": "Polyfill for IE (single threaded)"
-			}, {
-				"url": "http://net.tutsplus.com/tutorials/javascript-ajax/getting-started-with-web-workers/",
-				"title": "Tutorial"
-			}, {
-				"url": "https://developer.mozilla.org/En/Using_web_workers",
-				"title": "MDN article"
-			}, {
-				"url": "http://nerget.com/rayjs-mt/rayjs.html",
-				"title": "Web Worker demo"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "p",
-					"10.5": "p",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 70.53,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"fontface": {
-			"title": "@font-face Web fonts",
-			"description": "Method of displaying fonts downloaded from websites",
-			"spec": "http://www.w3.org/TR/css3-webfonts/",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/atrules/@font-face",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://www.css3files.com/font/",
-				"title": "Information page"
-			}, {
-				"url": "http://webfonts.info",
-				"title": "News and information site"
-			}, {
-				"url": "http://en.wikipedia.org/wiki/Web_typography",
-				"title": "Wikipedia"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "a",
-					"2.3": "a",
-					"3": "a",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "a",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support before IE8 refers to only supporting EOT fonts. Safari for iOS 4.1 and below only supports SVG fonts.",
-			"usage_perc_y": 79.25,
-			"usage_perc_a": 10.6,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "font face"
-		},
-		"eot": {
-			"title": "EOT - Embedded OpenType fonts",
-			"description": "Type of font that can be derived from a regular font, allowing small files and legal use of high-quality fonts. Usage is restricted by the file being tied to the website",
-			"spec": "http://www.w3.org/Submission/EOT/",
-			"status": "unoff",
-			"links": [{
-				"url": "http://www.microsoft.com/typography/web/embedding/default.aspx",
-				"title": "Example pages"
-			}, {
-				"url": "http://en.wikipedia.org/wiki/Embedded_OpenType",
-				"title": "Wikipedia"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "n",
-					"31": "n",
-					"32": "n"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Proposal by Microsoft, being considered for W3C standardization.",
-			"usage_perc_y": 25.14,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "fontface",
-			"keywords": ""
-		},
-		"woff": {
-			"title": "WOFF - Web Open Font Format",
-			"description": "Compressed TrueType/OpenType font that contains information about the font's source.",
-			"spec": "http://www.w3.org/TR/WOFF/",
-			"status": "rec",
-			"links": [{
-				"url": "http://hacks.mozilla.org/2009/10/woff/",
-				"title": "Mozilla hacks blog post"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Reported to be supported in some modified versions of the Android 4.0 browser.",
-			"usage_perc_y": 75.23,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "fontface",
-			"keywords": ""
-		},
-		"multibackgrounds": {
-			"title": "CSS3 Multiple backgrounds",
-			"description": "Method of using multiple images as a background",
-			"spec": "http://www.w3.org/TR/css3-background/",
-			"status": "cr",
-			"links": [{
-				"url": "http://www.css3.info/preview/multiple-backgrounds/",
-				"title": "Demo & information page"
-			}, {
-				"url": "http://www.css3files.com/background/",
-				"title": "Information page"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/background-image",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 85.37,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"border-image": {
-			"title": "CSS3 Border images",
-			"description": "Method of using images for borders",
-			"spec": "http://www.w3.org/TR/css3-background/#the-border-image",
-			"status": "cr",
-			"links": [{
-				"url": "http://www.css3files.com/border/",
-				"title": "Information page"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/border-image",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "a x",
-					"3.6": "a x",
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "y x",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a x",
-					"3.2": "a x",
-					"4": "a x",
-					"5": "a x",
-					"5.1": "a x",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "a",
-					"10.6": "a",
-					"11": "a x",
-					"11.1": "a x",
-					"11.5": "a x",
-					"11.6": "a x",
-					"12": "a x",
-					"12.1": "a x",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a x",
-					"4.0-4.1": "a x",
-					"4.2-4.3": "a x",
-					"5.0-5.1": "a x",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a x",
-					"2.2": "a x",
-					"2.3": "a x",
-					"3": "a x",
-					"4": "a x",
-					"4.1": "a x",
-					"4.2-4.3": "a x",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "a x",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "a x",
-					"11.1": "a x",
-					"11.5": "a x",
-					"12": "a x",
-					"12.1": "a x",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "In Firefox both the border-style and border-width must be specified for border-images to work. Partial support refers to supporting the shorthand syntax, but not the individual properties (border-image-source, border-image-slice, etc).",
-			"usage_perc_y": 54.86,
-			"usage_perc_a": 9.76,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"background-img-opts": {
-			"title": "CSS3 Background-image options",
-			"description": "New properties to affect background images, including background-clip, background-origin and background-size",
-			"spec": "http://www.w3.org/TR/css3-background/#backgrounds",
-			"status": "cr",
-			"links": [{
-				"url": "https://github.com/louisremi/background-size-polyfill",
-				"title": "Polyfill for IE7-8"
-			}, {
-				"url": "http://www.standardista.com/css3/css3-background-properties",
-				"title": "Detailed compatibility tables and demos"
-			}, {
-				"url": "http://www.css3files.com/background/",
-				"title": "Information page"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "a x",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a",
-					"3.2": "a",
-					"4": "a",
-					"5": "y",
-					"5.1": "y",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "a x",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "a"
-				},
-				"android": {
-					"2.1": "a x",
-					"2.2": "y x",
-					"2.3": "y x",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support in Opera Mini refers to not supporting background sizing or background attachments. Partial support in Safari 6 refers to not supporting background sizing offset from edges syntax.",
-			"usage_perc_y": 78.07,
-			"usage_perc_a": 7.32,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"css-table": {
-			"title": "CSS Table display",
-			"description": "Method of displaying elements as tables, rows, and cells",
-			"spec": "http://www.w3.org/TR/CSS21/tables.html",
-			"status": "rec",
-			"links": [{
-				"url": "http://blog.12spokes.com/web-design-development/when-to-choose-between-the-html-table-element-and-css-displaytable-property/",
-				"title": "Deciding on HTML or CSS tables"
-			}, {
-				"url": "http://www.onenaught.com/posts/201/use-css-displaytable-for-layout",
-				"title": "Blog post on usage"
-			}],
-			"categories": ["CSS2"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 93.86,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "display:table, display: table,table-cell,table-row,table-layout"
-		},
-		"css-gencontent": {
-			"title": "CSS Generated content",
-			"description": "Method of displaying text or images before or after the given element's contents using the :before and :after pseudo-elements",
-			"spec": "http://www.w3.org/TR/CSS21/generate.html",
-			"status": "rec",
-			"links": [{
-				"url": "http://www.westciv.com/style_master/academy/css_tutorial/advanced/generated_content.html",
-				"title": "Guide on usage"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/generated_and_replaced_content",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://dev.opera.com/articles/view/css-generated-content-techniques/",
-				"title": "Dev.Opera article"
-			}],
-			"categories": ["CSS2", "CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "a",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "IE8 only supports the single-colon CSS 2.1 syntax (i.e. pseudo-class). It does not support the double-colon CSS3 syntax (i.e. pseudo-element)",
-			"usage_perc_y": 85.55,
-			"usage_perc_a": 8.31,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "before,after"
-		},
-		"css-fixed": {
-			"title": "CSS position:fixed",
-			"description": "Method of keeping an element in a fixed location regardless of scroll position",
-			"spec": "http://www.w3.org/TR/CSS21/visuren.html#fixed-positioning",
-			"status": "rec",
-			"links": [{
-				"url": "http://www.css-101.org/fixed-positioning/05.php",
-				"title": "Workaround for IE6"
-			}, {
-				"url": "http://bradfrostweb.com/blog/mobile/fixed-position/",
-				"title": "Article on mobile support"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/position",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["CSS"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a",
-					"2.2": "a",
-					"2.3": "a",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Only works in Android 2.2+ by using the following meta tag: &lt;meta name=\"viewport\" content=\"width=device-width, user-scalable=no\">. Partial support in iOS Safari refers to <a href=\"http://remysharp.com/2012/05/24/issues-with-position-fixed-scrolling-on-ios/\">buggy behavior</a>.",
-			"usage_perc_y": 84.35,
-			"usage_perc_a": 5.39,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"hashchange": {
-			"title": "Hashchange event",
-			"description": "Event triggered in JavaScript when the URL's hash has changed (for example: page.html#foo to page.html#bar) ",
-			"spec": "http://www.w3.org/TR/html5/history.html#event-hashchange",
-			"status": "cr",
-			"links": [{
-				"url": "http://www.quirksmode.org/dom/events/tests/hashchange.html",
-				"title": "Simple demo"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/dom/events/hashchange",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://developer.mozilla.org/en/DOM/window.onhashchange",
-				"title": "MDN article"
-			}, {
-				"url": "http://github.com/3nr1c/jUri.js",
-				"title": "Polyfill"
-			}, {
-				"url": "http://msdn.microsoft.com/en-us/library/cc288209(VS.85).aspx",
-				"title": "MSDN article"
-			}],
-			"categories": ["HTML5", "JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "p",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "p",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "p",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "p",
-					"9.5-9.6": "p",
-					"10.0-10.1": "p",
-					"10.5": "p",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 88.92,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "onhashchange,HashChangeEvent"
-		},
-		"css-sel2": {
-			"title": "CSS 2.1 selectors",
-			"description": "Allows more accurate element selecting, using >, +, [attr], :first-child, etc.",
-			"spec": "http://www.w3.org/TR/CSS21/selector.html",
-			"status": "rec",
-			"links": [{
-				"url": "http://www.quirksmode.org/css/contents.html",
-				"title": "Detailed support information"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/selectors",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://selectivizr.com",
-				"title": "Selectivizr: Polyfill for IE6-8"
-			}, {
-				"url": "http://www.yourhtmlsource.com/stylesheets/advancedselectors.html",
-				"title": "Examples of advanced selectors"
-			}],
-			"categories": ["CSS2"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 94.36,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "child selector,:hover,adjacent,sibling,adjacent sibling"
-		},
-		"css-sel3": {
-			"title": "CSS3 selectors",
-			"description": "Advanced element selection using selectors like :nth-child(), :last-child, :first-of-type, etc.",
-			"spec": "http://www.w3.org/TR/css3-selectors/",
-			"status": "rec",
-			"links": [{
-				"url": "http://www.css3.info/selectors-test/",
-				"title": "Automated CSS3 selector test"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/selectors",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://www.quirksmode.org/css/contents.html",
-				"title": "Detailed support information"
-			}, {
-				"url": "http://selectivizr.com",
-				"title": "Selectivizr: Polyfill for IE6-8"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 85.43,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ":target,:not"
-		},
-		"css-textshadow": {
-			"title": "CSS3 Text-shadow",
-			"description": "Method of applying one or more shadow or blur effects to text",
-			"spec": "http://www.w3.org/TR/css-text-decor-3/#text-shadow-property",
-			"status": "wd",
-			"links": [{
-				"url": "http://ie.microsoft.com/testdrive/Graphics/hands-on-css3/hands-on_text-shadow.htm",
-				"title": "Live editor"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/text-shadow",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://hacks.mozilla.org/2009/06/text-shadow/",
-				"title": "Mozilla hacks article"
-			}, {
-				"url": "http://www.css3files.com/shadow/#textshadow",
-				"title": "Information page"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a",
-					"3.2": "a",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "a"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "a",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Opera Mini ignores the blur-radius set, so no blur effect is visible. Text-shadow behavior can be somewhat emulated in older IE versions using the non-standard \"dropshadow\" or \"glow\" filters. ",
-			"usage_perc_y": 75.49,
-			"usage_perc_a": 4.73,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"css-boxshadow": {
-			"title": "CSS3 Box-shadow",
-			"description": "Method of displaying an inner or outer shadow effect to elements",
-			"spec": "http://www.w3.org/TR/css3-background/#box-shadow",
-			"status": "cr",
-			"links": [{
-				"url": "http://www.css3files.com/shadow/",
-				"title": "Information page"
-			}, {
-				"url": "https://developer.mozilla.org/En/CSS/-moz-box-shadow",
-				"title": "MDN article"
-			}, {
-				"url": "http://westciv.com/tools/boxshadows/index.html",
-				"title": "Live editor"
-			}, {
-				"url": "http://tests.themasta.com/blogstuff/boxshadowdemo.html",
-				"title": "Demo of various effects"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/box-shadow",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y x",
-					"3.6": "y x",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a x",
-					"3.2": "a x",
-					"4": "a x",
-					"5": "y x",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a x",
-					"4.0-4.1": "y x",
-					"4.2-4.3": "y x",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a x",
-					"2.2": "a x",
-					"2.3": "a x",
-					"3": "a x",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y x",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Can be partially emulated in older IE versions using the non-standard \"shadow\" filter. Partial support in Safari, iOS Safari and Android Browser refers to missing \"inset\" and blur radius value support.",
-			"usage_perc_y": 79.27,
-			"usage_perc_a": 1.55,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "box-shadows,boxshadows,box shadow,shaow"
-		},
-		"css3-colors": {
-			"title": "CSS3 Colors",
-			"description": "Method of describing colors using Hue, Saturation and Lightness (hsl()) rather than just RGB, as well as allowing alpha-transparency with rgba() and hsla().",
-			"spec": "http://www.w3.org/TR/css3-color/",
-			"status": "rec",
-			"links": [{
-				"url": "http://www.zenelements.com/blog/css3-rgb-rgba-color-opacity/",
-				"title": "Guide to RGB & RGBA"
-			}, {
-				"url": "http://www.css3files.com/color/",
-				"title": "Information page"
-			}, {
-				"url": "http://www.zenelements.com/blog/css3-hsl-hsla-color-opacity/",
-				"title": "Guide to HSL & HSLA"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/color#RGBA_Notation",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://dev.opera.com/articles/view/color-in-opera-10-hsl-rgb-and-alpha-transparency/",
-				"title": "Dev.Opera article"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "a",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "a",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 85.51,
-			"usage_perc_a": 0.02,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "rgb,hsl,rgba,hsla"
-		},
-		"css3-boxsizing": {
-			"title": "CSS3 Box-sizing",
-			"description": "Method of specifying whether or not an element's borders and padding should be included in size units",
-			"spec": "http://www.w3.org/TR/css3-ui/#box-sizing",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/properties/box-sizing",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://css-tricks.com/box-sizing/",
-				"title": "CSS Tricks"
-			}, {
-				"url": "https://github.com/Schepp/box-sizing-polyfill",
-				"title": "Polyfill for IE"
-			}, {
-				"url": "https://developer.mozilla.org/En/CSS/Box-sizing",
-				"title": "MDN article"
-			}, {
-				"url": "http://www.456bereastreet.com/archive/201104/controlling_width_with_css3_box-sizing/",
-				"title": "Blog post"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "y x",
-					"3": "y x",
-					"3.5": "y x",
-					"3.6": "y x",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x"
-				},
-				"chrome": {
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a",
-					"28": "a",
-					"29": "a",
-					"30": "a",
-					"31": "a",
-					"32": "a"
-				},
-				"safari": {
-					"3.1": "a x",
-					"3.2": "a x",
-					"4": "a x",
-					"5": "a x",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "a",
-					"10.0-10.1": "a",
-					"10.5": "a",
-					"10.6": "a",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"11.6": "a",
-					"12": "a",
-					"12.1": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a"
-				},
-				"ios_saf": {
-					"3.2": "a x",
-					"4.0-4.1": "a x",
-					"4.2-4.3": "a x",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "a"
-				},
-				"android": {
-					"2.1": "a x",
-					"2.2": "a x",
-					"2.3": "a x",
-					"3": "a x",
-					"4": "a",
-					"4.1": "a",
-					"4.2-4.3": "a",
-					"4.4": "a"
-				},
-				"bb": {
-					"7": "a x",
-					"10": "a"
-				},
-				"op_mob": {
-					"10": "a",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"12": "a",
-					"12.1": "a",
-					"0": "a"
-				},
-				"and_chr": {
-					"0": "a"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "Partial support refers to supporting only the \"border-box\" value, not \"padding-box\" (which was added to the spec later).",
-			"usage_perc_y": 15.43,
-			"usage_perc_a": 78.42,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "border-box,content-box,padding-box"
-		},
-		"css-mediaqueries": {
-			"title": "CSS3 Media Queries",
-			"description": "Method of applying styles based on media information. Includes things like page and device dimensions",
-			"spec": "http://www.w3.org/TR/css3-mediaqueries/",
-			"status": "rec",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/atrules/@media",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://ie.microsoft.com/testdrive/HTML5/85CSS3_MediaQueries/",
-				"title": "IE demo page with information"
-			}, {
-				"url": "https://github.com/scottjehl/Respond",
-				"title": "Polyfill for IE"
-			}, {
-				"url": "http://webdesignerwall.com/tutorials/responsive-design-with-css3-media-queries",
-				"title": "Media Queries tutorial"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a",
-					"3.2": "a",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Incomplete support by older webkit browsers refers to only acknowledging different media rules on page reload",
-			"usage_perc_y": 85.42,
-			"usage_perc_a": 0.01,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "@media"
-		},
-		"multicolumn": {
-			"title": "CSS3 Multiple column layout",
-			"description": "Method of flowing information in multiple columns",
-			"spec": "http://www.w3.org/TR/css3-multicol/",
-			"status": "cr",
-			"links": [{
-				"url": "http://dev.opera.com/articles/view/css3-multi-column-layout/",
-				"title": "Dev.Opera article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/column-width",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://webdesign.tutsplus.com/tutorials/htmlcss-tutorials/an-introduction-to-the-css3-multiple-column-layout-module/",
-				"title": "Introduction page"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "a x",
-					"3": "a x",
-					"3.5": "a x",
-					"3.6": "a x",
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "a x",
-					"21": "a x",
-					"22": "a x",
-					"23": "a x",
-					"24": "a x",
-					"25": "a x",
-					"26": "a x",
-					"27": "a x"
-				},
-				"chrome": {
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "a x",
-					"21": "a x",
-					"22": "a x",
-					"23": "a x",
-					"24": "a x",
-					"25": "a x",
-					"26": "a x",
-					"27": "a x",
-					"28": "a x",
-					"29": "a x",
-					"30": "a x",
-					"31": "a x",
-					"32": "a x"
-				},
-				"safari": {
-					"3.1": "a x",
-					"3.2": "a x",
-					"4": "a x",
-					"5": "a x",
-					"5.1": "a x",
-					"6": "a x",
-					"6.1": "a x",
-					"7": "a x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x"
-				},
-				"ios_saf": {
-					"3.2": "a x",
-					"4.0-4.1": "a x",
-					"4.2-4.3": "a x",
-					"5.0-5.1": "a x",
-					"6.0-6.1": "a x",
-					"7.0": "a x"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "a x",
-					"2.2": "a x",
-					"2.3": "a x",
-					"3": "a x",
-					"4": "a x",
-					"4.1": "a x",
-					"4.2-4.3": "a x",
-					"4.4": "a x"
-				},
-				"bb": {
-					"7": "a x",
-					"10": "a x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "a x"
-				},
-				"and_chr": {
-					"0": "a x"
-				},
-				"and_ff": {
-					"0": "a x"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support refers to not supporting the break-before, break-after, break-inside properties. Webkit browsers do have equivalent support for the non-standard -webkit-column-break-* properties.",
-			"usage_perc_y": 16.41,
-			"usage_perc_a": 63.85,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "column-count"
-		},
-		"border-radius": {
-			"title": "CSS3 Border-radius (rounded corners)",
-			"description": "Method of making the border corners round",
-			"spec": "http://www.w3.org/TR/css3-background/#the-border-radius",
-			"status": "cr",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/properties/border-radius",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://muddledramblings.com/table-of-css3-border-radius-compliance",
-				"title": "Detailed compliance table"
-			}, {
-				"url": "http://www.css3files.com/border/#borderradius",
-				"title": "Information page"
-			}, {
-				"url": "http://css3pie.com/",
-				"title": "Polyfill which includes border-radius"
-			}, {
-				"url": "http://border-radius.com",
-				"title": "Border-radius CSS Generator"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "a x",
-					"3": "y x",
-					"3.5": "y x",
-					"3.6": "y x",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y x",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y x",
-					"3.2": "y x",
-					"4": "y x",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y x",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y x",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 80.91,
-			"usage_perc_a": 0.02,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "roundedcorners, border radius,-moz-border-radius"
-		},
-		"transforms2d": {
-			"title": "CSS3 Transforms",
-			"description": "Method of transforming an element including rotating, scaling, etc.",
-			"spec": "http://www.w3.org/TR/css3-2d-transforms/",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.westciv.com/tools/transforms/",
-				"title": "Live editor"
-			}, {
-				"url": "http://www.useragentman.com/IETransformsTranslator/",
-				"title": "Converter for IE"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/transforms/transform",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/css.js#css-transform",
-				"title": "has.js test"
-			}, {
-				"url": "https://developer.mozilla.org/en/CSS/-moz-transform",
-				"title": "MDN article"
-			}, {
-				"url": "http://www.webresourcesdepot.com/cross-browser-css-transforms-csssandpaper/",
-				"title": "Workaround script for IE"
-			}, {
-				"url": "http://www.css3files.com/transform/",
-				"title": "Information page"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y x",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y x",
-					"3.6": "y x",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "y x",
-					"3.2": "y x",
-					"4": "y x",
-					"5": "y x",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "y x",
-					"10.6": "y x",
-					"11": "y x",
-					"11.1": "y x",
-					"11.5": "y x",
-					"11.6": "y x",
-					"12": "y x",
-					"12.1": "y",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "y x",
-					"4.0-4.1": "y x",
-					"4.2-4.3": "y x",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y x",
-					"2.2": "y x",
-					"2.3": "y x",
-					"3": "y x",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "y x",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "The scale transform can be emulated in IE < 9 using Microsoft's \"zoom\" extension, others are (not easily) possible using the MS Matrix filter",
-			"usage_perc_y": 80.82,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "transformation,translate,rotation,rotate,scale,css-transforms"
-		},
-		"use-strict": {
-			"title": "ECMAScript 5 Strict Mode",
-			"description": "Method of placing code in a \"strict\" operating context.",
-			"spec": "http://ecma-international.org/ecma-262/5.1/#sec-14.1",
-			"status": "other",
-			"links": [{
-				"url": "http://javascriptweblog.wordpress.com/2011/05/03/javascript-strict-mode/",
-				"title": "Article with test suite"
-			}, {
-				"url": "http://ejohn.org/blog/ecmascript-5-strict-mode-json-and-more/",
-				"title": "Information page"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "a",
-					"5.1": "a",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support in older Safari refers to strict mode still accepting a lot of JS that should be considered invalid.",
-			"usage_perc_y": 71.65,
-			"usage_perc_a": 1.59,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"transforms3d": {
-			"title": "CSS3 3D Transforms",
-			"description": "Method of transforming an element in the third dimension",
-			"spec": "http://www.w3.org/TR/css3-3d-transforms/",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/transforms/transform",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://css3.bradshawenterprises.com/flip/",
-				"title": "Multi-browser demo"
-			}, {
-				"url": "http://thewebrocks.com/demos/3D-css-tester/",
-				"title": "3D CSS Tester"
-			}, {
-				"url": "http://hacks.mozilla.org/2011/10/css-3d-transformations-in-firefox-nightly/",
-				"title": "Mozilla hacks article"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/css.js#css-transform",
-				"title": "has.js test"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y x",
-					"5": "y x",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "y x",
-					"4.0-4.1": "y x",
-					"4.2-4.3": "y x",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y x",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "y x",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "Partial support in IE10 refers to not supporting <a href=\"http://msdn.microsoft.com/en-us/library/ie/hh673529%28v=vs.85%29.aspx#the_ms_transform_style_property\">the transform-style: preserve-3d property</a>. This prevents nesting 3D transformed elements.",
-			"usage_perc_y": 61.31,
-			"usage_perc_a": 11.11,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "css 3d,3dtransforms,translate3d,transform3d"
-		},
-		"sharedworkers": {
-			"title": "Shared Web Workers",
-			"description": "Method of allowing multiple scripts to communicate with a single web worker.",
-			"spec": "http://www.w3.org/TR/workers/#shared-workers-introduction",
-			"status": "cr",
-			"links": [{
-				"url": "http://www.sitepoint.com/javascript-shared-web-workers-html5/",
-				"title": "Sitepoint article"
-			}, {
-				"url": "http://greenido.wordpress.com/2011/11/03/web-workers-part-3-out-of-3-shared-wrokers/",
-				"title": "Blog post"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "u",
-					"27": "u"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "u",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Expected to be supported in Firefox 27.",
-			"usage_perc_y": 40.07,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "webworkers",
-			"keywords": "shared worker"
-		},
-		"css-hyphens": {
-			"title": "CSS Hyphenation",
-			"description": "Method of controlling when words at the end of lines should be hyphenated using the \"hyphens\" property.",
-			"spec": "http://www.w3.org/TR/css3-text/#hyphenation",
-			"status": "wd",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/CSS/hyphens",
-				"title": "MDN article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/hyphens",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://blog.fontdeck.com/post/9037028497/hyphens",
-				"title": "Blog post"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y x",
-					"11": "y x"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "n",
-					"31": "n",
-					"32": "n"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "y x",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Chrome 29- and Android 4.0 Browser support \"-webkit-hyphens: none\", but not the \"auto\" property. Chrome 30+ doesn't support it either.",
-			"usage_perc_y": 33.31,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "hyphen,shy"
-		},
-		"css-transitions": {
-			"title": "CSS3 Transitions",
-			"description": "Simple method of animating certain properties of an element",
-			"spec": "http://www.w3.org/TR/css3-transitions/",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/properties/transition",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://www.webdesignerdepot.com/2010/01/css-transitions-101/",
-				"title": "Article on usage"
-			}, {
-				"url": "http://www.opera.com/docs/specs/presto2.12/css/transitions/#anima",
-				"title": "Animation of property types support in Opera"
-			}, {
-				"url": "http://www.css3files.com/transition/",
-				"title": "Information page"
-			}, {
-				"url": "http://www.the-art-of-web.com/css/timing-function/",
-				"title": "Examples on timing functions"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y x",
-					"3.2": "y x",
-					"4": "y x",
-					"5": "y x",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "y x",
-					"10.6": "y x",
-					"11": "y x",
-					"11.1": "y x",
-					"11.5": "y x",
-					"11.6": "y x",
-					"12": "y x",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y x",
-					"4.0-4.1": "y x",
-					"4.2-4.3": "y x",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y x",
-					"2.2": "y x",
-					"2.3": "y x",
-					"3": "y x",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y x",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "y x",
-					"11": "y x",
-					"11.1": "y x",
-					"11.5": "y x",
-					"12": "y x",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 75.27,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "css transition"
-		},
-		"font-feature": {
-			"title": "Font feature settings",
-			"description": "Method of applying advanced typographic and language-specific font features to supported OpenType fonts.",
-			"spec": "http://w3.org/TR/css3-fonts/#font-rend-props",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/properties/font-feature-settings",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://hacks.mozilla.org/2010/11/firefox-4-font-feature-support/",
-				"title": "Mozilla hacks article"
-			}, {
-				"url": "http://html5accessibility.com/",
-				"title": "Detailed tables on accessability support"
-			}, {
-				"url": "http://ie.microsoft.com/testdrive/Graphics/opentype/",
-				"title": "Demo pages (IE/Firefox only)"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "a x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "a",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "a",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Partial support in older Firefox versions refers to using an older syntax. Partial support in older Chrome versions refers to lacking support in Mac OS X. ",
-			"usage_perc_y": 62.13,
-			"usage_perc_a": 6.41,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "font-feature,font-feature-settings,kern,kerning,font-variant-alternates,ligatures,font-variant-ligatures"
-		},
-		"css-animation": {
-			"title": "CSS3 Animation",
-			"description": "Complex method of animating certain properties of an element",
-			"spec": "http://www.w3.org/TR/css3-animations/",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/properties/animations",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://www.css3files.com/animation/",
-				"title": "Information page"
-			}, {
-				"url": "http://robertnyman.com/2010/05/06/css3-animations/",
-				"title": "Blog post on usage"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y x",
-					"5": "y x",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "y x",
-					"12.1": "y",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "y x",
-					"4.0-4.1": "y x",
-					"4.2-4.3": "y x",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a x",
-					"2.2": "a x",
-					"2.3": "a x",
-					"3": "a x",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "y x",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "y",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support in Android browser refers to buggy behavior in different scenarios.",
-			"usage_perc_y": 73.62,
-			"usage_perc_a": 1.44,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "animations,css-animations,keyframe,keyframes"
-		},
-		"css-gradients": {
-			"title": "CSS Gradients",
-			"description": "Method of defining a linear or radial color gradient as a CSS image.",
-			"spec": "http://www.w3.org/TR/css3-images/",
-			"status": "cr",
-			"links": [{
-				"url": "http://www.colorzilla.com/gradient-editor/",
-				"title": "Cross-browser editor"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/functions/linear-gradient",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://www.css3files.com/gradient/",
-				"title": "Information page"
-			}, {
-				"url": "http://css3pie.com/",
-				"title": "Tool to emulate support in IE"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "y x",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "a x",
-					"5": "a x",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "a x",
-					"11.5": "a x",
-					"11.6": "y x",
-					"12": "y x",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a x",
-					"4.0-4.1": "a x",
-					"4.2-4.3": "a x",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a x",
-					"2.2": "a x",
-					"2.3": "a x",
-					"3": "a x",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "a x",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "a x",
-					"11.5": "a x",
-					"12": "y x",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support in Opera 11.10 and 11.50 also refers to only having support for linear gradients. Support can be somewhat emulated in older IE versions using the non-standard \"gradient\" filter. Firefox 10+, Opera 11.6+, Chrome 26+ and IE10 also support the new \"to (side)\" syntax.",
-			"usage_perc_y": 73.31,
-			"usage_perc_a": 2.22,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "linear,linear-gradient,gradiant"
-		},
-		"css-canvas": {
-			"title": "CSS Canvas Drawings",
-			"description": "Method of using HTML5 Canvas as a background image",
-			"spec": "http://webkit.org/blog/176/css-canvas-drawing/",
-			"status": "unoff",
-			"links": [{
-				"url": "http://webkit.org/blog/176/css-canvas-drawing/",
-				"title": "Webkit blog post"
-			}],
-			"categories": ["CSS"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "u",
-					"27": "u"
-				},
-				"chrome": {
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y x",
-					"5": "y x",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "y x",
-					"4.0-4.1": "y x",
-					"4.2-4.3": "y x",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y x",
-					"2.2": "y x",
-					"2.3": "y x",
-					"3": "y x",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "y x",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Proposal by Webkit, being considered for W3C standardization. A similar effect can be achieved in Firefox 4+ using the -moz-element() background property",
-			"usage_perc_y": 48.41,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"css-reflections": {
-			"title": "CSS Reflections",
-			"description": "Method of displaying a reflection of an element",
-			"spec": "http://webkit.org/blog/182/css-reflections/",
-			"status": "unoff",
-			"links": [{
-				"url": "http://webkit.org/blog/182/css-reflections/",
-				"title": "Webkit blog post"
-			}],
-			"categories": ["CSS"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y x",
-					"5": "y x",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "y x",
-					"4.0-4.1": "y x",
-					"4.2-4.3": "y x",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y x",
-					"2.2": "y x",
-					"2.3": "y x",
-					"3": "y x",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "y x",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Similar effect can be achieved in Firefox 4+ using the -moz-element() background property",
-			"usage_perc_y": 48.41,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "box-reflect"
-		},
-		"css-masks": {
-			"title": "CSS Masks",
-			"description": "Method of displaying part of an element, using a selected image as a mask",
-			"spec": "http://www.w3.org/TR/css-masking/",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/properties/mask",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://www.html5rocks.com/en/tutorials/masking/adobe/",
-				"title": "HTML5 Rocks article"
-			}, {
-				"url": "http://thenittygritty.co/css-masking",
-				"title": "Detailed blog post"
-			}],
-			"categories": ["CSS"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "u",
-					"27": "u"
-				},
-				"chrome": {
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "a x",
-					"21": "a x",
-					"22": "a x",
-					"23": "a x",
-					"24": "a x",
-					"25": "a x",
-					"26": "a x",
-					"27": "a x",
-					"28": "a x",
-					"29": "a x",
-					"30": "a x",
-					"31": "a x",
-					"32": "a x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "a x",
-					"5": "a x",
-					"5.1": "a x",
-					"6": "a x",
-					"6.1": "a x",
-					"7": "a x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x"
-				},
-				"ios_saf": {
-					"3.2": "a x",
-					"4.0-4.1": "a x",
-					"4.2-4.3": "a x",
-					"5.0-5.1": "a x",
-					"6.0-6.1": "a x",
-					"7.0": "a x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a x",
-					"2.2": "a x",
-					"2.3": "a x",
-					"3": "a x",
-					"4": "a x",
-					"4.1": "a x",
-					"4.2-4.3": "a x",
-					"4.4": "a x"
-				},
-				"bb": {
-					"7": "a x",
-					"10": "a x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "a x"
-				},
-				"and_chr": {
-					"0": "a x"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Previously a WebKit-only property, now a W3C specification. Partial support refers to not yet fully supporting the new spec (details currently unknown).",
-			"usage_perc_y": 0,
-			"usage_perc_a": 48.41,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"svg": {
-			"title": "SVG (basic support)",
-			"description": "Method of displaying basic Vector Graphics features using the embed or object elements",
-			"spec": "http://www.w3.org/Graphics/SVG/",
-			"status": "rec",
-			"links": [{
-				"url": "http://en.wikipedia.org/wiki/Scalable_Vector_Graphics",
-				"title": "Wikipedia"
-			}, {
-				"url": "http://code.google.com/p/svgweb/",
-				"title": "SVG Web: Flash-based polyfill"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/graphics.js#svg",
-				"title": "has.js test"
-			}, {
-				"url": "http://svg-edit.googlecode.com",
-				"title": "Web-based SVG editor"
-			}, {
-				"url": "http://www.alistapart.com/articles/using-svg-for-flexible-scalable-and-fun-backgrounds-part-i",
-				"title": "A List Apart article"
-			}, {
-				"url": "http://svg-wow.org/",
-				"title": "SVG showcase site"
-			}],
-			"categories": ["SVG"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "a",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 84.1,
-			"usage_perc_a": 0.02,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"svg-css": {
-			"title": "SVG in CSS backgrounds",
-			"description": "Method of using SVG images as CSS backgrounds",
-			"spec": "http://www.w3.org/TR/css3-background/#background-image",
-			"status": "cr",
-			"links": [{
-				"url": "http://designfestival.com/a-farewell-to-css3-gradients/",
-				"title": "Tutorial for advanced effects"
-			}],
-			"categories": ["SVG", "CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "a",
-					"4": "a",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "a"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "a",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"12": "a",
-					"12.1": "a",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support in older Firefox and Opera Mini/Mobile refers to SVG images being blurry when scaled. Partial support in iOS Safari and older Safari versions refers to failing to support tiling or the background-position property.",
-			"usage_perc_y": 75.45,
-			"usage_perc_a": 8.2,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "svg-in-css,svgincss,css-svg"
-		},
-		"svg-smil": {
-			"title": "SVG SMIL animation",
-			"description": "Method of using animation elements to animate SVG images",
-			"spec": "http://www.w3.org/TR/SVG/animate.html",
-			"status": "rec",
-			"links": [{
-				"url": "https://github.com/madsgraphics/SVGEventListener",
-				"title": "Polyfill for SMIL animate events on SVG"
-			}, {
-				"url": "https://developer.mozilla.org/en/SVG/SVG_animation_with_SMIL",
-				"title": "MDN article"
-			}, {
-				"url": "http://svg-wow.org/blog/category/animation/",
-				"title": "Examples on SVG WOW"
-			}, {
-				"url": "http://leunen.me/fakesmile/",
-				"title": "JS library to support SMIL in SVG"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/graphics.js#svg-smil",
-				"title": "has.js test"
-			}],
-			"categories": ["SVG"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "p"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "p",
-					"3.6": "p",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "a",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "a",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "p"
-				}
-			},
-			"notes": "Partial support in Safari refers to not working in HTML files.",
-			"usage_perc_y": 54.76,
-			"usage_perc_a": 7.99,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"svg-fonts": {
-			"title": "SVG fonts",
-			"description": "Method of using fonts defined as SVG shapes",
-			"spec": "http://www.w3.org/TR/SVG/fonts.html",
-			"status": "rec",
-			"links": [{
-				"url": "http://opentype.info/blog/2010/04/13/the-ipad-and-svg-fonts-in-mobile-safari/",
-				"title": "Blog post on usage for iPad"
-			}, {
-				"url": "http://jeremie.patonnier.net/post/2011/02/07/Why-are-SVG-Fonts-so-different",
-				"title": "Blog post"
-			}],
-			"categories": ["SVG"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Supported in Opera Mini in SVG images only, not in HTML.",
-			"usage_perc_y": 47.78,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "fontface",
-			"keywords": ""
-		},
-		"svg-filters": {
-			"title": "SVG filters",
-			"description": "Method of using photoshop-like effects on SVG objects including blurring and color manipulation.",
-			"spec": "http://www.w3.org/TR/SVG/filters.html",
-			"status": "rec",
-			"links": [{
-				"url": "http://electricbeach.org/?p=950",
-				"title": "Experiments with filter effects"
-			}, {
-				"url": "http://svg-wow.org/blog/category/filters/",
-				"title": "SVG filter demos"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/svg/elements/filter",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["SVG"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 72.99,
-			"usage_perc_a": 0.08,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"svg-html": {
-			"title": "SVG effects for HTML",
-			"description": "Method of using SVG transforms, filters, etc on HTML elements using either CSS or the foreignObject element",
-			"spec": "http://www.w3.org/TR/SVG11/extend.html#ForeignObjectElement",
-			"status": "wd",
-			"links": [{
-				"url": "https://developer.mozilla.org/En/Applying_SVG_effects_to_HTML_content",
-				"title": "MDN Reference page"
-			}, {
-				"url": "https://dvcs.w3.org/hg/FXTF/raw-file/tip/filters/index.html",
-				"title": "Filter Effects draft"
-			}, {
-				"url": "https://developer.mozilla.org/en/SVG/Tutorial/Other_content_in_SVG",
-				"title": "MDN Tutorial"
-			}],
-			"categories": ["SVG"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "a",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "a",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a",
-					"28": "a",
-					"29": "a",
-					"30": "a",
-					"31": "a",
-					"32": "a"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "a",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "a",
-					"9.5-9.6": "a",
-					"10.0-10.1": "a",
-					"10.5": "a",
-					"10.6": "a",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"11.6": "a",
-					"12": "a",
-					"12.1": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "a",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "a"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "a",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"12": "a",
-					"12.1": "a",
-					"0": "a"
-				},
-				"and_chr": {
-					"0": "a"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Partial support refers to lack of filter support or buggy result from effects. A <a href=\"https://dvcs.w3.org/hg/FXTF/raw-file/tip/filters/index.html\">CSS Filter Effects</a> specification is in the works that would replace this method.",
-			"usage_perc_y": 15.33,
-			"usage_perc_a": 60.21,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"svg-html5": {
-			"title": "Inline SVG in HTML5",
-			"description": "Method of using SVG tags directly in HTML documents. Requires HTML5 parser.",
-			"spec": "http://www.w3.org/TR/html5/embedded-content-0.html#svg-0",
-			"status": "cr",
-			"links": [{
-				"url": "http://hacks.mozilla.org/2010/05/firefox-4-the-html5-parser-inline-svg-speed-and-more/",
-				"title": "Mozilla Hacks blog post"
-			}, {
-				"url": "http://samples.msdn.microsoft.com/ietestcenter/html5/svghtml_harness.htm?url=SVG_HTML_Elements_001",
-				"title": "Test suite"
-			}],
-			"categories": ["SVG", "HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "p",
-					"3.6": "p",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "p",
-					"5": "p",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "p",
-					"9.5-9.6": "p",
-					"10.0-10.1": "p",
-					"10.5": "p",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "p",
-					"4.0-4.1": "p",
-					"4.2-4.3": "p",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 78.45,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"canvas": {
-			"title": "Canvas (basic support)",
-			"description": "Method of generating fast, dynamic graphics using JavaScript",
-			"spec": "http://www.w3.org/TR/html5/embedded-content-0.html#the-canvas-element",
-			"status": "cr",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/Canvas_tutorial",
-				"title": "Tutorial by Mozilla"
-			}, {
-				"url": "http://explorercanvas.googlecode.com/",
-				"title": "Implementation for Internet Explorer"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/graphics.js#canvas",
-				"title": "has.js test"
-			}, {
-				"url": "http://www.diveinto.org/html5/canvas.html",
-				"title": "Another tutorial"
-			}, {
-				"url": "http://glimr.rubyforge.org/cake/canvas.html",
-				"title": "Animation kit "
-			}, {
-				"url": "http://www.canvasdemos.com/",
-				"title": "Showcase site"
-			}],
-			"categories": ["Canvas", "HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "a"
-				},
-				"android": {
-					"2.1": "a",
-					"2.2": "a",
-					"2.3": "a",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Opera Mini supports the canvas element, but is unable to play animations or run other more complex applications. Android 2.x supports canvas except the toDataURL() function. See http://code.google.com/p/android/issues/detail?id=7901 Some (slow) workarounds are described here: http://stackoverflow.com/q/10488033/841830",
-			"usage_perc_y": 79.53,
-			"usage_perc_a": 6.02,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"canvas-text": {
-			"title": "Text API for Canvas",
-			"description": "Method of displaying text on Canvas elements",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/the-canvas-element.html#text-0",
-			"status": "wd",
-			"links": [{
-				"url": "http://code.google.com/p/canvas-text/",
-				"title": "Support library"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/canvas/CanvasRenderingContext2D/fillText",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/graphics.js#canvas-text",
-				"title": "has.js test"
-			}, {
-				"url": "https://developer.mozilla.org/en/Drawing_text_using_a_canvas#Additional_examples",
-				"title": "Examples by Mozilla"
-			}],
-			"categories": ["Canvas", "HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "p",
-					"9.5-9.6": "p",
-					"10.0-10.1": "p",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 80.82,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "canvas",
-			"keywords": ""
-		},
-		"namevalue-storage": {
-			"title": "Web Storage - name/value pairs",
-			"description": "Method of storing data locally like cookies, but for larger amounts of data (sessionStorage and localStorage, used to fall under HTML5).",
-			"spec": "http://www.w3.org/TR/webstorage/#storage",
-			"status": "rec",
-			"links": [{
-				"url": "http://html5demos.com/storage",
-				"title": "Simple demo"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/web-storage/Storage/localStorage",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://developer.mozilla.org/En/DOM/Storage",
-				"title": "Gecko reference"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-localstorage;native-sessionstorage",
-				"title": "has.js test"
-			}, {
-				"url": "http://code.google.com/p/sessionstorage/",
-				"title": "Support library"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "a",
-					"3": "a",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "In private browsing mode Safari and iOS Safari don't support setting localStorage.",
-			"usage_perc_y": 89.13,
-			"usage_perc_a": 0.1,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "webstorage,local storage"
-		},
-		"sql-storage": {
-			"title": "Web SQL Database",
-			"description": "Method of storing data client-side, allows Sqlite database queries for access and manipulation",
-			"spec": "http://www.w3.org/TR/webdatabase/",
-			"status": "unoff",
-			"links": [{
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-sql-db",
-				"title": "has.js test"
-			}, {
-				"url": "http://html5doctor.com/introducing-web-sql-databases/",
-				"title": "HTML5 Doctor article"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "The Web SQL Database specification is no longer being maintained and support may be dropped in future versions.",
-			"usage_perc_y": 49.18,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "db-storage,websql"
-		},
-		"indexeddb": {
-			"title": "IndexedDB",
-			"description": "Method of storing data client-side, allows indexed database queries. Previously known as WebSimpleDB API.",
-			"spec": "http://www.w3.org/TR/IndexedDB/",
-			"status": "wd",
-			"links": [{
-				"url": "http://hacks.mozilla.org/2010/06/comparing-indexeddb-and-webdatabase/",
-				"title": "Mozilla Hacks article"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-indexeddb",
-				"title": "has.js test"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/indexedDB",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://github.com/axemclion/IndexedDBShim",
-				"title": "Polyfill for browsers supporting WebSQL"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "a x",
-					"21": "a x",
-					"22": "a x",
-					"23": "y x",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "a x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support in BB10 refers to an <a href=\"http://www.w3.org/TR/2011/WD-IndexedDB-20110419/\">outdated specification</a> being implemented. Code targeting the <a href=\"http://www.w3.org/TR/IndexedDB/\">current state of the specification</a> might not work.",
-			"usage_perc_y": 59.46,
-			"usage_perc_a": 1.68,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "indexdb"
-		},
-		"eventsource": {
-			"title": "Server-sent DOM events",
-			"description": "Method of continuously sending data from a server to the browser, rather than repeatedly requesting it (EventSource interface, used to fall under HTML5)",
-			"spec": "http://www.w3.org/TR/eventsource/",
-			"status": "cr",
-			"links": [{
-				"url": "http://www.html5rocks.com/tutorials/eventsource/basics/",
-				"title": "HTML5 Rocks tutorial"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-eventsource",
-				"title": "has.js test"
-			}, {
-				"url": "http://samshull.blogspot.com/2010/10/ajax-push-in-ios-safari-and-chrome-with.html",
-				"title": "Blog post with demo"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "a",
-					"9.5-9.6": "a",
-					"10.0-10.1": "a",
-					"10.5": "a",
-					"10.6": "a",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "a",
-					"11": "a",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 58.8,
-			"usage_perc_a": 0.06,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "serversent,s-sent-events"
-		},
-		"x-doc-messaging": {
-			"title": "Cross-document messaging",
-			"description": "Method of sending information from a page on one domain to a page on a different one (using postMessage)",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/comms.html#crossDocumentMessages",
-			"status": "wd",
-			"links": [{
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-crosswindowmessaging",
-				"title": "has.js test"
-			}, {
-				"url": "http://html5demos.com/postmessage2",
-				"title": "Simple demo"
-			}, {
-				"url": "https://developer.mozilla.org/en/DOM/window.postMessage",
-				"title": "MDN article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/web-messaging/methods/postMessage_%28window%29",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://72lions.com/2011/05/cross-origin-communication-with-html5",
-				"title": "Article and demo"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "Partial support in IE8-9 refers to only working in frames/iframes (not other tabs/windows). Also in IE 9 and below an object cannot be sent using postMessage. Partial support in IE10 refers to <a href=\"http://stackoverflow.com/questions/16226924/is-cross-origin-postmessage-broken-in-ie10\">limitations in certain conditions</a>",
-			"usage_perc_y": 69.31,
-			"usage_perc_a": 24.52,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"datauri": {
-			"title": "Data URIs",
-			"description": "Method of embedding images and other files in webpages as a string of text",
-			"spec": "http://www.ietf.org/rfc/rfc2397.txt",
-			"status": "other",
-			"links": [{
-				"url": "http://www.websiteoptimization.com/speed/tweak/inline-images/",
-				"title": "Data URL converter"
-			}, {
-				"url": "http://css-tricks.com/5970-data-uris/",
-				"title": "Information page"
-			}, {
-				"url": "http://en.wikipedia.org/wiki/data_URI_scheme",
-				"title": "Wikipedia"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "Support in Internet Explorer 8 is limited to images and linked resources like CSS files, not HTML files. Max URI length in IE8 is 32KB. In IE9+ JavaScript files are supported too and the maximum size limit set to 4GB.",
-			"usage_perc_y": 69.23,
-			"usage_perc_a": 24.63,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "data url,datauris,data uri,dataurl,dataurls"
-		},
-		"mathml": {
-			"title": "MathML",
-			"description": "An XML language that allows mathematical formulas and notations to be written on web pages.",
-			"spec": "http://www.w3.org/TR/MathML/",
-			"status": "rec",
-			"links": [{
-				"url": "http://www.mozilla.org/projects/mathml/demo/",
-				"title": "MathML demos"
-			}, {
-				"url": "http://en.wikipedia.org/wiki/MathML",
-				"title": "Wikipedia"
-			}, {
-				"url": "http://www.mathjax.org",
-				"title": "Cross-browser support script"
-			}, {
-				"url": "https://developer.mozilla.org/en/MathML/Element",
-				"title": "MDN element reference"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "p",
-					"12": "p",
-					"13": "p",
-					"14": "p",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p",
-					"19": "p",
-					"20": "p",
-					"21": "p",
-					"22": "p",
-					"23": "p",
-					"24": "y",
-					"25": "p",
-					"26": "p",
-					"27": "p",
-					"28": "p",
-					"29": "p",
-					"30": "p",
-					"31": "p",
-					"32": "p"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "p",
-					"5": "p",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "a",
-					"10.0-10.1": "a",
-					"10.5": "a",
-					"10.6": "a",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"11.6": "a",
-					"12": "a",
-					"12.1": "a",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p"
-				},
-				"ios_saf": {
-					"3.2": "p",
-					"4.0-4.1": "p",
-					"4.2-4.3": "p",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "p"
-				},
-				"android": {
-					"2.1": "p",
-					"2.2": "p",
-					"2.3": "p",
-					"3": "p",
-					"4": "p",
-					"4.1": "p",
-					"4.2-4.3": "p",
-					"4.4": "p"
-				},
-				"bb": {
-					"7": "p",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"12": "p",
-					"12.1": "p",
-					"0": "p"
-				},
-				"and_chr": {
-					"0": "p"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Opera's support is limited to a CSS profile of MathML. Support was added in Chrome 24, but removed afterwards due to instability.",
-			"usage_perc_y": 23.15,
-			"usage_perc_a": 0.63,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"css-featurequeries": {
-			"title": "CSS Feature Queries",
-			"description": "CSS Feature Queries allow authors to condition rules based on whether particular property declarations are supported in CSS using the @supports at rule.",
-			"spec": "http://www.w3.org/TR/css3-conditional/#at-supports",
-			"status": "cr",
-			"links": [{
-				"url": "http://dabblet.com/gist/3895764",
-				"title": "Test case"
-			}, {
-				"url": "http://mcc.id.au/blog/2012/08/supports",
-				"title": "@supports in Firefox"
-			}, {
-				"url": "https://developer.mozilla.org/en-US/docs/Web/CSS/@supports",
-				"title": "MDN Article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/atrules/@supports",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 45.52,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "supports,conditional"
-		},
-		"xhtml": {
-			"title": "XHTML served as application/xhtml+xml",
-			"description": "A strict form of HTML, and allows embedding of other XML languages",
-			"spec": "http://www.w3.org/TR/xhtml1/",
-			"status": "rec",
-			"links": [{
-				"url": "http://en.wikipedia.org/wiki/XHTML",
-				"title": "Wikipedia"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/concepts/internet_and_web/the_web_standards_model#What_is_XHTML.3F",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://www.xmlplease.com/xhtml/xhtml5polyglot/",
-				"title": "Information on XHTML5"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "The XHTML syntax is very close to HTML, and thus is almost always (<a href=\"https://developer.mozilla.org/en-US/docs/XHTML#MIME_type_versus_DOCTYPE\">incorrectly</a>) served as text/html on the web.",
-			"usage_perc_y": 85.55,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "xhtml+xml"
-		},
-		"xhtmlsmil": {
-			"title": "XHTML+SMIL animation",
-			"description": "Method of using SMIL animation in web pages",
-			"spec": "http://www.w3.org/TR/XHTMLplusSMIL/",
-			"status": "unoff",
-			"links": [{
-				"url": "http://en.wikipedia.org/wiki/XHTML%2BSMIL",
-				"title": "Wikipedia"
-			}, {
-				"url": "http://leunen.me/fakesmile/",
-				"title": "JS library to support XHTML+SMIL"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "p",
-					"3.6": "p",
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "p",
-					"12": "p",
-					"13": "p",
-					"14": "p",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p",
-					"19": "p",
-					"20": "p",
-					"21": "p",
-					"22": "p",
-					"23": "p",
-					"24": "p",
-					"25": "p",
-					"26": "p",
-					"27": "p"
-				},
-				"chrome": {
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "p",
-					"12": "p",
-					"13": "p",
-					"14": "p",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p",
-					"19": "p",
-					"20": "p",
-					"21": "p",
-					"22": "p",
-					"23": "p",
-					"24": "p",
-					"25": "p",
-					"26": "p",
-					"27": "p",
-					"28": "p",
-					"29": "p",
-					"30": "p",
-					"31": "p",
-					"32": "p"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "p",
-					"5": "p",
-					"5.1": "p",
-					"6": "p",
-					"6.1": "p",
-					"7": "p"
-				},
-				"opera": {
-					"9": "p",
-					"9.5-9.6": "p",
-					"10.0-10.1": "p",
-					"10.5": "p",
-					"10.6": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"11.6": "p",
-					"12": "p",
-					"12.1": "p",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p"
-				},
-				"ios_saf": {
-					"3.2": "p",
-					"4.0-4.1": "p",
-					"4.2-4.3": "p",
-					"5.0-5.1": "p",
-					"6.0-6.1": "p",
-					"7.0": "p"
-				},
-				"op_mini": {
-					"5.0-7.0": "p"
-				},
-				"android": {
-					"2.1": "p",
-					"2.2": "p",
-					"2.3": "p",
-					"3": "p",
-					"4": "p",
-					"4.1": "p",
-					"4.2-4.3": "p",
-					"4.4": "p"
-				},
-				"bb": {
-					"7": "p",
-					"10": "p"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"12": "p",
-					"12.1": "p",
-					"0": "p"
-				},
-				"and_chr": {
-					"0": "p"
-				},
-				"and_ff": {
-					"0": "p"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Internet Explorer supports the W3C proposal HTML+TIME, which is largely the same as XHTML+SMIL",
-			"usage_perc_y": 0,
-			"usage_perc_a": 9.02,
-			"ucprefix": false,
-			"parent": "xhtml",
-			"keywords": ""
-		},
-		"wai-aria": {
-			"title": "WAI-ARIA Accessibility features",
-			"description": "Method of providing ways for people with disabilities to use dynamic web content and web applications.",
-			"spec": "http://www.w3.org/TR/wai-aria/",
-			"status": "cr",
-			"links": [{
-				"url": "http://www.alistapart.com/articles/the-accessibility-of-wai-aria/",
-				"title": "ALA Article"
-			}, {
-				"url": "http://en.wikipedia.org/wiki/WAI-ARIA",
-				"title": "Wikipedia"
-			}, {
-				"url": "http://zufelt.ca/blog/are-you-confused-html5-and-wai-aria-yet",
-				"title": "HTML5/WAI-ARIA information"
-			}, {
-				"url": "http://www.w3.org/WAI/intro/aria",
-				"title": "Information page"
-			}, {
-				"url": "http://www.paciellogroup.com/blog/2011/10/browser-assistive-technology-tests-redux/",
-				"title": "Links to various test results"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "a",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a",
-					"28": "a",
-					"29": "a",
-					"30": "a",
-					"31": "a",
-					"32": "a"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "a",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "a",
-					"10.0-10.1": "a",
-					"10.5": "a",
-					"10.6": "a",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"11.6": "a",
-					"12": "a",
-					"12.1": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "a",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "a"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "a"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "a",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"12": "a",
-					"12.1": "a",
-					"0": "a"
-				},
-				"and_chr": {
-					"0": "a"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 40.05,
-			"usage_perc_a": 48.6,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "wai,aria"
-		},
-		"geolocation": {
-			"title": "Geolocation",
-			"description": "Method of informing a website of the user's geographical location",
-			"spec": "http://www.w3.org/TR/geolocation-API/",
-			"status": "cr",
-			"links": [{
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-geolocation",
-				"title": "has.js test"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/geolocation",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://html5demos.com/geo",
-				"title": "Simple demo"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "p",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "p",
-					"10.5": "p",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "n",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 80.65,
-			"usage_perc_a": 0.02,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"flexbox": {
-			"title": "Flexible Box Layout Module",
-			"description": "Method of positioning elements in horizontal or vertical stacks.",
-			"spec": "http://www.w3.org/TR/css3-flexbox/",
-			"status": "cr",
-			"links": [{
-				"url": "http://css-tricks.com/snippets/css/a-guide-to-flexbox/",
-				"title": "A Complete Guide to Flexbox"
-			}, {
-				"url": "http://bennettfeely.com/flexplorer/",
-				"title": "Flexbox CSS generator"
-			}, {
-				"url": "http://www.adobe.com/devnet/html5/articles/working-with-flexbox-the-new-spec.html",
-				"title": "Article on using the latest spec"
-			}, {
-				"url": "http://philipwalton.github.io/solved-by-flexbox/",
-				"title": "Examples on how to solve common layout problems with flexbox"
-			}, {
-				"url": "http://dev.opera.com/articles/view/advanced-cross-browser-flexbox/",
-				"title": "Tutorial on cross-browser support"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "a x #2",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "a x #1",
-					"3": "a x #1",
-					"3.5": "a x #1",
-					"3.6": "a x #1",
-					"4": "a x #1",
-					"5": "a x #1",
-					"6": "a x #1",
-					"7": "a x #1",
-					"8": "a x #1",
-					"9": "a x #1",
-					"10": "a x #1",
-					"11": "a x #1",
-					"12": "a x #1",
-					"13": "a x #1",
-					"14": "a x #1",
-					"15": "a x #1",
-					"16": "a x #1",
-					"17": "a x #1",
-					"18": "a x #1",
-					"19": "a x #1",
-					"20": "a x #1",
-					"21": "a x #1",
-					"22": "a #3",
-					"23": "a #3",
-					"24": "a #3",
-					"25": "a #3",
-					"26": "a #3",
-					"27": "a #3"
-				},
-				"chrome": {
-					"4": "a x #1",
-					"5": "a x #1",
-					"6": "a x #1",
-					"7": "a x #1",
-					"8": "a x #1",
-					"9": "a x #1",
-					"10": "a x #1",
-					"11": "a x #1",
-					"12": "a x #1",
-					"13": "a x #1",
-					"14": "a x #1",
-					"15": "a x #1",
-					"16": "a x #1",
-					"17": "a x #1",
-					"18": "a x #1",
-					"19": "a x #1",
-					"20": "a x #1",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a x #1",
-					"3.2": "a x #1",
-					"4": "a x #1",
-					"5": "a x #1",
-					"5.1": "a x #1",
-					"6": "a x #1",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "y",
-					"15": "y x",
-					"16": "y x",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a x #1",
-					"4.0-4.1": "a x #1",
-					"4.2-4.3": "a x #1",
-					"5.0-5.1": "a x #1",
-					"6.0-6.1": "a x #1",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a x #1",
-					"2.2": "a x #1",
-					"2.3": "a x #1",
-					"3": "a x #1",
-					"4": "a x #1",
-					"4.1": "a x #1",
-					"4.2-4.3": "a x #1",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "a x #1",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "a x #1"
-				},
-				"ie_mob": {
-					"10": "a x #2"
-				}
-			},
-			"notes": "Most partial support refers to supporting an <a href=\"http://www.w3.org/TR/2009/WD-css3-flexbox-20090723/\">older version</a> of the specification or an <a href=\"http://www.w3.org/TR/2012/WD-css3-flexbox-20120322/\">older syntax</a>. For Firefox 21+ it refers to lack of flex-wrap & flex-flow support.",
-			"usage_perc_y": 37.88,
-			"usage_perc_a": 37.66,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "flex"
-		},
-		"webgl": {
-			"title": "WebGL - 3D Canvas graphics",
-			"description": "Method of generating dynamic 3D graphics using JavaScript, accelerated through hardware",
-			"spec": "https://www.khronos.org/registry/webgl/specs/1.0/",
-			"status": "other",
-			"links": [{
-				"url": "http://khronos.org/webgl/wiki/Getting_a_WebGL_Implementation",
-				"title": "Instructions on enabling WebGL"
-			}, {
-				"url": "http://webkit.org/blog/603/webgl-now-available-in-webkit-nightlies/",
-				"title": "Webkit blog post"
-			}, {
-				"url": "http://www.khronos.org/webgl/wiki/Tutorial",
-				"title": "Tutorial"
-			}, {
-				"url": "http://hacks.mozilla.org/2009/12/webgl-draft-released-today/",
-				"title": "Firefox blog post"
-			}, {
-				"url": "http://iewebgl.com/",
-				"title": "Polyfill for IE"
-			}],
-			"categories": ["Canvas"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "a",
-					"12.1": "a",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "a",
-					"12.1": "a",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "p"
-				}
-			},
-			"notes": "Support listed as \"partial\" refers to the fact that not all users with these browsers have WebGL access. This is due to the additional requirement for users to have <a href=\"http://www.khronos.org/webgl/wiki/BlacklistsAndWhitelists\">up to date video drivers</a>. This problem was <a href=\"http://blog.chromium.org/2012/02/gpu-accelerating-2d-canvas-and-enabling.html\">solved in Chrome</a> as of version 18.\r\n\r\nNote that WebGL is part of the <a href=\"http://www.khronos.org/webgl/\">Khronos Group</a>, not the W3C. On Chrome for Android, WebGL is disabled by default, but can be enabled by enabling the \"Enable WebGL\" flag under chrome://flags",
-			"usage_perc_y": 33.4,
-			"usage_perc_a": 19.68,
-			"ucprefix": false,
-			"parent": "canvas",
-			"keywords": "web gl"
-		},
-		"fileapi": {
-			"title": "File API",
-			"description": "Method of manipulating file objects in web applications client-side, as well as programmatically selecting them and accessing their data.",
-			"spec": "http://www.w3.org/TR/FileAPI/",
-			"status": "wd",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/Using_files_from_web_applications",
-				"title": "MDN article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/file",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "a",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "a",
-					"4": "a",
-					"4.1": "a",
-					"4.2-4.3": "a",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "a",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Partial support in older Safari refers to lacking FileReader support. ",
-			"usage_perc_y": 67.73,
-			"usage_perc_a": 5.38,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "FileReader"
-		},
-		"shadowdom": {
-			"title": "Shadow DOM",
-			"description": "Method of establishing and maintaining functional boundaries between DOM trees and how these trees interact with each other within a document, thus enabling better functional encapsulation within the DOM.",
-			"spec": "http://www.w3.org/TR/shadow-dom/",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.html5rocks.com/tutorials/webcomponents/shadowdom/",
-				"title": "HTML5Rocks - Shadow DOM 101 article"
-			}, {
-				"url": "http://html5-demos.appspot.com/static/shadowdom-visualizer/index.html",
-				"title": "Shadow DOM Visualizer"
-			}],
-			"categories": ["DOM", "HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "y x",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 33.29,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "web components"
-		},
-		"websockets": {
-			"title": "Web Sockets",
-			"description": "Bidirectional communication technology for web apps",
-			"spec": "http://www.w3.org/TR/websockets/",
-			"status": "cr",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/apis/websocket",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-websockets",
-				"title": "has.js test"
-			}, {
-				"url": "http://websocket.org/aboutwebsocket.html",
-				"title": "WebSockets information"
-			}, {
-				"url": "http://en.wikipedia.org/wiki/WebSocket",
-				"title": "Wikipedia"
-			}, {
-				"url": "http://updates.html5rocks.com/2011/08/What-s-different-in-the-new-WebSocket-protocol",
-				"title": "Details on newer protocol"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "a",
-					"5": "a",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "a",
-					"5.1": "a",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"11.6": "a",
-					"12": "a",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "a",
-					"5.0-5.1": "a",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"12": "a",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support refers to the websockets implementation using an older version of the protocol and/or the implementation being disabled by default (due to security issues with the older protocol).",
-			"usage_perc_y": 67.46,
-			"usage_perc_a": 2.62,
-			"ucprefix": true,
-			"parent": "",
-			"keywords": ""
-		},
-		"script-async": {
-			"title": "async attribute for external scripts",
-			"description": "The boolean async attribute on script elements allows the external JavaScript file to run when it's available, without delaying page load first.",
-			"spec": "http://www.w3.org/TR/html5/scripting-1.html#attr-script-async",
-			"status": "cr",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/HTML/Element/script#Attributes",
-				"title": "MDN article"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/script.js#script-async",
-				"title": "has.js test"
-			}, {
-				"url": "http://ie.microsoft.com/testdrive/Performance/AsyncScripts/Default.html",
-				"title": "Demo"
-			}],
-			"categories": ["HTML5", "DOM"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "a",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Using script.async = false; to maintain execution order for dynamically-added scripts isn't supported in Safari 5.0",
-			"usage_perc_y": 72.82,
-			"usage_perc_a": 0.31,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"cors": {
-			"title": "Cross-Origin Resource Sharing",
-			"description": "Method of performing XMLHttpRequests across domains",
-			"spec": "http://www.w3.org/TR/cors/",
-			"status": "cr",
-			"links": [{
-				"url": "http://saltybeagle.com/2009/09/cross-origin-resource-sharing-demo/",
-				"title": "Demo and script with cross-browser support"
-			}, {
-				"url": "http://hacks.mozilla.org/2009/07/cross-site-xmlhttprequest-with-cors/",
-				"title": "Mozilla Hacks blog post"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-cors-xhr",
-				"title": "has.js test"
-			}, {
-				"url": "http://msdn.microsoft.com/en-us/library/cc288060(VS.85).aspx",
-				"title": "Alternative implementation by IE8"
-			}, {
-				"url": "http://dev.opera.com/articles/view/dom-access-control-using-cross-origin-resource-sharing/",
-				"title": "DOM access using CORS"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "a",
-					"9": "a",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Supported somewhat in IE8 and IE9 using the XDomainRequest object (but has <a href=\" http://blogs.msdn.com/b/ieinternals/archive/2010/05/13/xdomainrequest-restrictions-limitations-and-workarounds.aspx\">limitations</a>)",
-			"usage_perc_y": 75.51,
-			"usage_perc_a": 13.52,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"calc": {
-			"title": "calc() as CSS unit value",
-			"description": "Method of allowing calculated values for length units, i.e. width: calc(100% - 3em)",
-			"spec": "http://www.w3.org/TR/css3-values/#calc",
-			"status": "cr",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/functions/calc",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://developer.mozilla.org/en/CSS/-moz-calc",
-				"title": "MDN article"
-			}, {
-				"url": "http://hacks.mozilla.org/2010/06/css3-calc/",
-				"title": "Mozilla Hacks article"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "y x",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "y x",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Support can be somewhat emulated in older versions of IE using the non-standard expression() syntax. ",
-			"usage_perc_y": 71.77,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"ruby": {
-			"title": "Ruby annotation",
-			"description": "Method of adding pronunciation or other annotations using ruby elements (primarily used in East Asian typography)",
-			"spec": "http://www.w3.org/TR/html-markup/ruby.html",
-			"status": "wd",
-			"links": [{
-				"url": "https://addons.mozilla.org/firefox/addon/6812/",
-				"title": "Addon \"HTML Ruby\" for Firefox support"
-			}, {
-				"url": "http://html5doctor.com/ruby-rt-rp-element/",
-				"title": "HTML5 Doctor article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/elements/ruby",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://addons.mozilla.org/firefox/addon/1935/",
-				"title": "Add-on \"XHTML Ruby Support\" for Firefox"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "p",
-					"3.6": "p",
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "p",
-					"12": "p",
-					"13": "p",
-					"14": "p",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p",
-					"19": "p",
-					"20": "p",
-					"21": "p",
-					"22": "p",
-					"23": "p",
-					"24": "p",
-					"25": "p",
-					"26": "p",
-					"27": "p"
-				},
-				"chrome": {
-					"4": "p",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a",
-					"28": "a",
-					"29": "a",
-					"30": "a",
-					"31": "a",
-					"32": "a"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "p",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "p",
-					"9.5-9.6": "p",
-					"10.0-10.1": "p",
-					"10.5": "p",
-					"10.6": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"11.6": "p",
-					"12": "p",
-					"12.1": "p",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a"
-				},
-				"ios_saf": {
-					"3.2": "p",
-					"4.0-4.1": "p",
-					"4.2-4.3": "p",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "p"
-				},
-				"android": {
-					"2.1": "p",
-					"2.2": "p",
-					"2.3": "p",
-					"3": "a",
-					"4": "a",
-					"4.1": "a",
-					"4.2-4.3": "a",
-					"4.4": "a"
-				},
-				"bb": {
-					"7": "p",
-					"10": "a"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"12": "p",
-					"12.1": "p",
-					"0": "a"
-				},
-				"and_chr": {
-					"0": "a"
-				},
-				"and_ff": {
-					"0": "p"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "Browsers without native support can still simulate support using CSS. Partial support refers to only supporting basic ruby, may still be missing writing-mode, Complex ruby and CSS3 Ruby",
-			"usage_perc_y": 0,
-			"usage_perc_a": 72.03,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"css-opacity": {
-			"title": "CSS3 Opacity",
-			"description": "Method of setting the transparency level of an element",
-			"spec": "http://www.w3.org/TR/css3-color/",
-			"status": "rec",
-			"links": [{
-				"url": "http://www.css3files.com/color/#opacity",
-				"title": "Information page"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/opacity",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Transparency for elements in IE8 and older can be achieved using the proprietary \"filter\" property and does not work well with PNG images using alpha transparency.",
-			"usage_perc_y": 85.55,
-			"usage_perc_a": 9.03,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "transparent,transparency,alpha"
-		},
-		"form-validation": {
-			"title": "Form validation",
-			"description": "Method of setting required fields and field types without requiring JavaScript",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/forms.html#client-side-form-validation",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/html/attributes/required",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "Partial support in Safari refers to lack of notice when form with required fields is attempted to be submitted. Partial support in IE10 mobile refers to lack of warning when blocking submission.",
-			"usage_perc_y": 61.75,
-			"usage_perc_a": 4.07,
-			"ucprefix": false,
-			"parent": "forms",
-			"keywords": ""
-		},
-		"history": {
-			"title": "Session history management",
-			"description": "Method of manipulating the user's browser's session history in JavaScript using history.pushState, history.replaceState and the popstate event",
-			"spec": "http://www.w3.org/TR/html5/browsers.html#history-1",
-			"status": "cr",
-			"links": [{
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-history-state",
-				"title": "has.js test"
-			}, {
-				"url": "https://github.com/browserstate/history.js",
-				"title": "History.js polyfill "
-			}, {
-				"url": "http://docs.webplatform.org/wiki/dom/history",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://html5demos.com/history",
-				"title": "Demo page"
-			}, {
-				"url": "http://www.adequatelygood.com/2010/7/Saner-HTML5-History-Management",
-				"title": "Introduction to history management"
-			}, {
-				"url": "https://developer.mozilla.org/en/DOM/Manipulating_the_browser_history",
-				"title": "MDN article"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "a",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Older iOS versions and Android 4.0.4 claim support, but implementation is too buggy to be useful. Partial support in other Safari browsers refers to other buggy behavior.",
-			"usage_perc_y": 68.29,
-			"usage_perc_a": 3.89,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "onpushstate,onreplacestate"
-		},
-		"json": {
-			"title": "JSON parsing",
-			"description": "Method of converting JavaScript objects to JSON strings and JSON back to objects using JSON.stringify() and JSON.parse()",
-			"spec": "http://es5.github.com/#x15.12",
-			"status": "other",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/apis/json",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/json.js#json",
-				"title": "has.js test"
-			}, {
-				"url": "http://www.json.org/js.html",
-				"title": "JSON in JS (includes script w/support)"
-			}, {
-				"url": "https://developer.mozilla.org/En/Using_native_JSON",
-				"title": "MDN article"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Requires document to be in IE8+ <a href=\"http://msdn.microsoft.com/en-us/library/cc288325(VS.85).aspx\">standards mode</a> to work in IE8.",
-			"usage_perc_y": 93.71,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"classlist": {
-			"title": "classList (DOMTokenList )",
-			"description": "Method of easily manipulating classes on elements, using the DOMTokenList object.",
-			"spec": "http://www.w3.org/TR/dom/#dom-element-classlist",
-			"status": "wd",
-			"links": [{
-				"url": "https://github.com/eligrey/classList.js",
-				"title": "Polyfill script"
-			}, {
-				"url": "http://hacks.mozilla.org/2010/01/classlist-in-firefox-3-6/",
-				"title": "Mozilla Hacks article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/dom/properties/classList",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://github.com/eligrey/classList.js/pull/12",
-				"title": "Polyfill script for classList on SVG elements on WebKit"
-			}],
-			"categories": ["DOM", "HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "p",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "p",
-					"5": "p",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "p",
-					"9.5-9.6": "p",
-					"10.0-10.1": "p",
-					"10.5": "p",
-					"10.6": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "p",
-					"4.0-4.1": "p",
-					"4.2-4.3": "p",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "p"
-				},
-				"android": {
-					"2.1": "p",
-					"2.2": "p",
-					"2.3": "p",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "p",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 73.54,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"text-overflow": {
-			"title": "CSS3 Text-overflow",
-			"description": "Append ellipsis when text overflows its containing element",
-			"spec": "http://www.w3.org/TR/css3-ui/#text-overflow0",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.css3files.com/text/",
-				"title": "Information page"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/css.js#css-text-overflow",
-				"title": "has.js test"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/text-overflow",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://developer.mozilla.org/En/CSS/Text-overflow",
-				"title": "MDN article"
-			}, {
-				"url": "https://github.com/rmorse/AutoEllipsis",
-				"title": "jQuery polyfill for Firefox"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "p",
-					"3.6": "p",
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y x",
-					"9.5-9.6": "y x",
-					"10.0-10.1": "y x",
-					"10.5": "y x",
-					"10.6": "y x",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y x"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y x",
-					"11": "y x",
-					"11.1": "y x",
-					"11.5": "y x",
-					"12": "y x",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 93.95,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "textoverflow,ellipsis"
-		},
-		"webm": {
-			"title": "WebM/VP8 video format",
-			"description": "Multimedia format designed to provide a royalty-free, high-quality open video compression format for use with HTML5 video.",
-			"spec": "http://www.webmproject.org/",
-			"status": "other",
-			"links": [{
-				"url": "http://perian.org/",
-				"title": "Perian :Mac OSX Webm Codec install"
-			}, {
-				"url": "https://tools.google.com/dlpage/webmmf",
-				"title": "Codec for IE9 support"
-			}, {
-				"url": "http://webmproject.org",
-				"title": "Officical website"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/video.js#video-webm",
-				"title": "has.js test"
-			}, {
-				"url": "http://www.broken-links.com/2010/09/01/playing-webm-in-safari-with-plugins/",
-				"title": "Info on supporting WebM in Safari"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "p",
-					"10": "p",
-					"11": "p"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "p",
-					"4": "p",
-					"5": "p",
-					"5.1": "p",
-					"6": "p",
-					"6.1": "p",
-					"7": "p"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "p"
-				}
-			},
-			"notes": "Will work in IE9+ and Safari/MacOSX provided the user has the WebM codecs installed.",
-			"usage_perc_y": 55.72,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "video",
-			"keywords": "matroska"
-		},
-		"mpeg4": {
-			"title": "MPEG-4/H.264 video format",
-			"description": "Commonly used video compression format (not royalty-free)",
-			"spec": "http://ip.hhi.de/imagecom_G1/assets/pdfs/csvt_overview_0305.pdf",
-			"status": "other",
-			"links": [{
-				"url": "http://www.interoperabilitybridges.com/html5-extension-for-wmp-plugin",
-				"title": "Firefox extension allowing support in Win7"
-			}, {
-				"url": "http://en.wikipedia.org/wiki/H.264/MPEG-4_AVC",
-				"title": "Wikipedia article"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a",
-					"2.2": "a",
-					"2.3": "a",
-					"3": "a",
-					"4": "a",
-					"4.1": "a",
-					"4.2-4.3": "a",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "a"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "The Android 2.3 browser currently requires <a href=\"http://www.broken-links.com/2010/07/08/making-html5-video-work-on-android-phones/\">specific handling</a> to play videos. Firefox <a href=\"http://blog.lizardwrangler.com/2012/03/18/video-user-experience-and-our-mission/\">will include support</a> on some platforms in upcoming versions. Firefox supports H.264 on Windows 7 and later since version 21. Partial support for Firefox refers to the lack of support in OSX & Linux platforms, for Android Firefox it refers to the inability of hardware acceleration.",
-			"usage_perc_y": 59.55,
-			"usage_perc_a": 18.1,
-			"ucprefix": false,
-			"parent": "video",
-			"keywords": "avc,mp4,mpv,mov,aac"
-		},
-		"ogv": {
-			"title": "Ogg/Theora video format",
-			"description": "Free lossy video compression format.",
-			"spec": "http://theora.org/doc/",
-			"status": "other",
-			"links": [{
-				"url": "http://en.wikipedia.org/wiki/Theora",
-				"title": "Wikipedia article"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "p",
-					"10": "p",
-					"11": "p"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "p"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 49.8,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "video",
-			"keywords": "xiph"
-		},
-		"wordwrap": {
-			"title": "CSS3 Overflow-wrap",
-			"description": "Allows lines to be broken within words if an otherwise unbreakable string is too long to fit.",
-			"spec": "http://www.w3.org/TR/css3-text/#overflow-wrap",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/properties/word-wrap",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://developer.mozilla.org/En/CSS/Word-wrap",
-				"title": "MDN article"
-			}, {
-				"url": "http://www.css3files.com/text/#wordwrap",
-				"title": "Information page"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "a",
-					"3.6": "a",
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a",
-					"3.2": "a",
-					"4": "a",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "a",
-					"10.6": "a",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"11.6": "a",
-					"12": "a",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "a",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "a"
-				},
-				"android": {
-					"2.1": "a",
-					"2.2": "a",
-					"2.3": "a",
-					"3": "a",
-					"4": "a",
-					"4.1": "a",
-					"4.2-4.3": "a",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "a",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "a",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"12": "a",
-					"12.1": "a",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "a"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "Partial support refers to requiring the legacy name \"word-wrap\" (rather than overflow-wrap) to work.",
-			"usage_perc_y": 36.93,
-			"usage_perc_a": 57.51,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "wordwrap,word-wrap"
-		},
-		"progressmeter": {
-			"title": "Progress & Meter",
-			"description": "Method of indicating a progress state (progress element) or the current level of a gauge (meter element).\r\n",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/the-button-element.html#the-progress-element",
-			"status": "wd",
-			"links": [{
-				"url": "http://dev.opera.com/articles/view/new-form-features-in-HTML5/#newoutput",
-				"title": "Dev.Opera article"
-			}, {
-				"url": "http://peter.sh/examples/?/html/meter-progress.html",
-				"title": "Examples of progress and meter elements"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/elements/progress",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://html5doctor.com/measure-up-with-the-meter-tag/",
-				"title": "HTML5 Doctor on meter element "
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "Partial support in Firefox 6-15, IE10 & iOS7 Safari refers to supporting the progress element, but not the meter element. iOS7 Safari also does not support \"indeterminate\" progress elements.",
-			"usage_perc_y": 52.21,
-			"usage_perc_a": 14.58,
-			"ucprefix": false,
-			"parent": "forms",
-			"keywords": ""
-		},
-		"object-fit": {
-			"title": "CSS3 object-fit/object-position",
-			"description": "Method of specifying how an object (image or video) should fit inside its box. object-fit options include \"contain\" (fit according to aspect ratio), \"fill\" (stretches object to fill) and \"cover\" (overflows box but maintains ratio), where object-position allows the object to be repositioned like background-image does.",
-			"spec": "http://www.w3.org/TR/css3-images/",
-			"status": "cr",
-			"links": [{
-				"url": "http://dev.opera.com/articles/view/css3-object-fit-object-position/",
-				"title": "Dev.Opera article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/object-fit",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "u",
-					"27": "u"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "n",
-					"31": "n",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "y x",
-					"11": "y x",
-					"11.1": "y x",
-					"11.5": "y x",
-					"11.6": "y x",
-					"12": "y x",
-					"12.1": "y x",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y x",
-					"11.1": "y x",
-					"11.5": "y x",
-					"12": "y x",
-					"12.1": "y x",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Can be enabled in Chrome 31+ and Opera 18+ by enabling experimental Web Platform features under chrome://flags/ or opera://flags/.",
-			"usage_perc_y": 0.81,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "objectfit,objectposition"
-		},
-		"xhr2": {
-			"title": "XMLHttpRequest 2",
-			"description": "Adds more functionality to AJAX requests like file uploads, transfer progress information and the ability to send form data.",
-			"spec": "http://www.w3.org/TR/XMLHttpRequest2/",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/apis/xhr/XMLHttpRequest",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://www.profilepicture.co.uk/tutorials/ajax-file-upload-xmlhttprequest-level-2/",
-				"title": "Article with file upload demo"
-			}, {
-				"url": "https://developer.mozilla.org/en/XMLHttpRequest/FormData",
-				"title": "MDN article on FormData"
-			}, {
-				"url": "https://github.com/3nr1c/jUri.js",
-				"title": "Polyfill for FormData object"
-			}],
-			"categories": ["DOM", "JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "a",
-					"3.6": "a",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "u",
-					"5": "u",
-					"6": "u",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 73.51,
-			"usage_perc_a": 0.35,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "formdata"
-		},
-		"minmaxwh": {
-			"title": "CSS min/max-width/height",
-			"description": "Method of setting a minimum or maximum width or height to an element. ",
-			"spec": "http://www.w3.org/TR/CSS21/visudet.html#min-max-widths",
-			"status": "rec",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/properties/min-width",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://code.google.com/p/ie7-js/",
-				"title": "JS library with support"
-			}, {
-				"url": "http://www.impressivewebs.com/min-max-width-height-css/",
-				"title": "CSS Basics post"
-			}],
-			"categories": ["CSS2"],
-			"stats": {
-				"ie": {
-					"5.5": "p",
-					"6": "p",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "IE7 does not support \"inherit\" as a value on any of these properties. IE8 has some bugs with max-width/height combined with overflow: auto/scroll.",
-			"usage_perc_y": 94.36,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "min-width,min-height,max-width,max-height"
-		},
-		"details": {
-			"title": "Details & Summary elements",
-			"description": "The &lt;details> element generates a simple no-JavaScript widget to show/hide element contents, optionally by clicking on its child &lt;summary> element.",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/interactive-elements.html#the-details-element",
-			"status": "wd",
-			"links": [{
-				"url": "http://html5doctor.com/summary-figcaption-element/",
-				"title": "HTML5 Doctor article"
-			}, {
-				"url": "http://mathiasbynens.be/notes/html5-details-jquery",
-				"title": "jQuery fallback script"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/elements/details",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-details",
-				"title": "has.js test"
-			}, {
-				"url": "https://gist.github.com/370590",
-				"title": "Fallback script"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "p",
-					"3.5": "p",
-					"3.6": "p",
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "p",
-					"12": "p",
-					"13": "p",
-					"14": "p",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p",
-					"19": "p",
-					"20": "p",
-					"21": "p",
-					"22": "p",
-					"23": "p",
-					"24": "p",
-					"25": "p",
-					"26": "p",
-					"27": "p"
-				},
-				"chrome": {
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "p",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "p",
-					"5": "p",
-					"5.1": "p",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "p",
-					"9.5-9.6": "p",
-					"10.0-10.1": "p",
-					"10.5": "p",
-					"10.6": "p",
-					"11": "p",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "p",
-					"4.0-4.1": "p",
-					"4.2-4.3": "p",
-					"5.0-5.1": "p",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "p"
-				},
-				"android": {
-					"2.1": "p",
-					"2.2": "p",
-					"2.3": "p",
-					"3": "p",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "p",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"12": "p",
-					"12.1": "p",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 44.5,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"text-stroke": {
-			"title": "CSS text-stroke",
-			"description": "Method of declaring the outline (stroke) width and color for text.",
-			"spec": "http://developer.apple.com/library/safari/documentation/appleapplications/reference/SafariCSSRef/Articles/StandardCSSProperties.html#//apple_ref/doc/uid/TP30001266-_webkit_text_stroke",
-			"status": "unoff",
-			"links": [{
-				"url": "http://www.westciv.com/tools/textStroke/",
-				"title": "Live editor"
-			}, {
-				"url": "http://css-tricks.com/7405-adding-stroke-to-web-text/",
-				"title": "Information & workarounds"
-			}],
-			"categories": ["CSS"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "u",
-					"27": "u"
-				},
-				"chrome": {
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "y x",
-					"3.2": "y x",
-					"4": "y x",
-					"5": "y x",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "a x",
-					"4.0-4.1": "y x",
-					"4.2-4.3": "y x",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y x",
-					"2.2": "y x",
-					"2.3": "y x",
-					"3": "n",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "y x",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Does not yet appear in any W3C specification. Was briefly included in a spec as the \"text-outline\" property, but this was removed.",
-			"usage_perc_y": 48.41,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "textstroke,stroke-color,stroke-width,fill-color"
-		},
-		"inline-block": {
-			"title": "CSS inline-block",
-			"description": "Method of displaying an element as a block while flowing it with text. ",
-			"spec": "http://www.w3.org/TR/CSS21/visuren.html#fixed-positioning",
-			"status": "rec",
-			"links": [{
-				"url": "http://robertnyman.com/2010/02/24/css-display-inline-block-why-it-rocks-and-why-it-sucks/",
-				"title": "Blog post w/info"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/display",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://blog.mozilla.com/webdev/2009/02/20/cross-browser-inline-block/",
-				"title": "Info on cross browser support"
-			}],
-			"categories": ["CSS2"],
-			"stats": {
-				"ie": {
-					"5.5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "a x",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Only supported in IE6 and IE7 on elements with a display of \"inline\" by default. <a href=\"http://blog.mozilla.com/webdev/2009/02/20/cross-browser-inline-block/\">Alternative properties</a> are available to provide complete cross-browser support.",
-			"usage_perc_y": 93.84,
-			"usage_perc_a": 0.74,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "inlineblock"
-		},
-		"notifications": {
-			"title": "Web Notifications",
-			"description": "Method of alerting the user outside of a web page by displaying notifications (that do not require interaction by the user).",
-			"spec": "http://www.w3.org/TR/notifications/",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.html5rocks.com/tutorials/notifications/quick/",
-				"title": "HTML5 Rocks tutorial"
-			}, {
-				"url": "http://www.chromium.org/developers/design-documents/desktop-notifications/api-specification",
-				"title": "Chromium API"
-			}, {
-				"url": "https://addons.mozilla.org/en-us/firefox/addon/221523/",
-				"title": "Add-on "
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "a x",
-					"21": "a x",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "a x"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "a x"
-				},
-				"and_chr": {
-					"0": "a x"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 45.27,
-			"usage_perc_a": 2.66,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"stream": {
-			"title": "getUserMedia/Stream API",
-			"description": "Method of accessing external device data (such as a webcam video stream). Formerly this was envisioned as the &lt;device> element.",
-			"spec": "http://www.w3.org/TR/mediacapture-streams/",
-			"status": "wd",
-			"links": [{
-				"url": "http://my.opera.com/core/blog/2011/03/23/webcam-orientation-preview",
-				"title": "Technology preview from Opera"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/dom/methods/getUserMedia",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["HTML5", "JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "y",
-					"12.1": "y",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "y",
-					"12.1": "y",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 48.44,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "camera,device,getUserMedia,media stream,Media Capture API"
-		},
-		"svg-img": {
-			"title": "SVG in HTML img element",
-			"description": "Method of displaying SVG images in HTML using &lt;img>",
-			"spec": "http://www.w3.org/TR/html5/embedded-content-1.html#the-img-element",
-			"status": "cr",
-			"links": [{
-				"url": "http://www.codedread.com/blog/",
-				"title": "Blog with SVGs an images"
-			}, {
-				"url": "http://blog.dholbert.org/2010/10/svg-as-image.html",
-				"title": "Blog post with examples"
-			}],
-			"categories": ["SVG"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "a",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 83.65,
-			"usage_perc_a": 0.01,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "svg-as-img,svg-in-img"
-		},
-		"datalist": {
-			"title": "Datalist element",
-			"description": "Method of setting a list of options for a user to select in a text field, while leaving the ability to enter a custom value.",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/the-button-element.html#the-datalist-element",
-			"status": "wd",
-			"links": [{
-				"url": "http://demo.agektmr.com/datalist/",
-				"title": "Eiji Kitamura's options demos & tests"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/elements/datalist",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://developer.mozilla.org/en/HTML/Element/datalist",
-				"title": "MDN reference"
-			}, {
-				"url": "http://afarkas.github.com/webshim/demos/",
-				"title": "HTML5 Library including datalist support"
-			}, {
-				"url": "http://hacks.mozilla.org/2010/11/firefox-4-html5-forms/",
-				"title": "Mozilla Hacks article"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "p",
-					"3": "p",
-					"3.5": "p",
-					"3.6": "p",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "p",
-					"12": "p",
-					"13": "p",
-					"14": "p",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p",
-					"19": "n",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "p",
-					"3.2": "p",
-					"4": "p",
-					"5": "p",
-					"5.1": "p",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "p",
-					"4.0-4.1": "p",
-					"4.2-4.3": "p",
-					"5.0-5.1": "p",
-					"6.0-6.1": "p",
-					"7.0": "p"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "p",
-					"2.2": "p",
-					"2.3": "p",
-					"3": "p",
-					"4": "p",
-					"4.1": "p",
-					"4.2-4.3": "p",
-					"4.4": "p"
-				},
-				"bb": {
-					"7": "p",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "p"
-				},
-				"and_chr": {
-					"0": "p"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "p"
-				}
-			},
-			"notes": "Partial support in IE10 refers to <a href=\"http://playground.onereason.eu/2013/04/ie10s-lousy-support-for-datalists/\">significantly buggy behavior</a>.",
-			"usage_perc_y": 48.86,
-			"usage_perc_a": 10.9,
-			"ucprefix": false,
-			"parent": "forms",
-			"keywords": "list attribute"
-		},
-		"dataset": {
-			"title": "dataset & data-* attributes",
-			"description": "Method of applying and accessing custom data to elements.",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/elements.html#embedding-custom-non-visible-data-with-the-data-*-attributes",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.orangesoda.net/jquery.dataset.html",
-				"title": "jQuery polyfill for dataset support"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/dom.js#dom-dataset",
-				"title": "has.js test"
-			}, {
-				"url": "http://html5demos.com/dataset",
-				"title": "Demo using dataset"
-			}, {
-				"url": "http://html5doctor.com/html5-custom-data-attributes/",
-				"title": "HTML5 Doctor article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/attributes/data-*",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "a",
-					"3": "a",
-					"3.5": "a",
-					"3.6": "a",
-					"4": "a",
-					"5": "a",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a",
-					"3.2": "a",
-					"4": "a",
-					"5": "a",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "a",
-					"9.5-9.6": "a",
-					"10.0-10.1": "a",
-					"10.5": "a",
-					"10.6": "a",
-					"11": "a",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "a",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "a"
-				},
-				"android": {
-					"2.1": "a",
-					"2.2": "a",
-					"2.3": "a",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "a",
-					"11": "a",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "All browsers can already use data-* attributes and access them using getAttribute. \"Supported\" refers to accessing the values using the dataset property. Current spec only refers to support on HTML elements, only some browsers also have support for SVG/MathML elements.",
-			"usage_perc_y": 62.15,
-			"usage_perc_a": 32.43,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "DOMStringMap"
-		},
-		"css-grid": {
-			"title": "CSS Grid Layout",
-			"description": "Method of using a grid concept to lay out content, providing a mechanism for authors to divide available space for lay out into columns and rows using a set of predictable sizing behaviors",
-			"spec": "http://www.w3.org/TR/css3-grid-layout/",
-			"status": "wd",
-			"links": [{
-				"url": "https://bugzilla.mozilla.org/show_bug.cgi?id=616605",
-				"title": "Mozilla (Firefox) feature request"
-			}, {
-				"url": "http://blogs.msdn.com/b/ie/archive/2011/04/14/ie10-platform-preview-and-css-features-for-adaptive-layouts.aspx",
-				"title": "IE Blog post"
-			}, {
-				"url": "https://github.com/codler/Grid-Layout-Polyfill",
-				"title": "Grid Layout Polyfill"
-			}, {
-				"url": "https://bugs.webkit.org/show_bug.cgi?id=60731",
-				"title": "Webkit (Chrome, Safari, etc.) feature request"
-			}],
-			"categories": ["CSS"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "p",
-					"10": "y x",
-					"11": "y x"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "p",
-					"20": "p",
-					"21": "p",
-					"22": "p",
-					"23": "p",
-					"24": "p",
-					"25": "p",
-					"26": "u",
-					"27": "u"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "p",
-					"26": "p",
-					"27": "p",
-					"28": "p",
-					"29": "p",
-					"30": "p",
-					"31": "u",
-					"32": "u"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "p",
-					"6.1": "p",
-					"7": "p"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "p",
-					"7.0": "p"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "p",
-					"4.4": "p"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "p"
-				},
-				"and_chr": {
-					"0": "p"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "y x"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 11.11,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "grids,grid-row,grid-column"
-		},
-		"menu": {
-			"title": "Toolbar/context menu",
-			"description": "Method of defining a toolbar menu, a context menu or a list of (interactive) options using the &lt;menu> element.",
-			"spec": "http://www.w3.org/TR/html5/interactive-elements.html#context-menus",
-			"status": "cr",
-			"links": [{
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/events.js#event-contextmenu",
-				"title": "has.js test"
-			}, {
-				"url": "https://bug617528.bugzilla.mozilla.org/attachment.cgi?id=554309",
-				"title": "Demo"
-			}, {
-				"url": "http://addyosmani.github.com/jQuery-contextMenu/",
-				"title": "jQuery polyfill"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "n",
-					"31": "u",
-					"32": "u"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Partial support in Firefox refers to using the non-standard \"menuitem\" child elements, where the current spec uses \"<a href=\"http://www.w3.org/TR/html5/interactive-elements.html#the-command-element\">command</a>\" child elements. It is also currently limited to context menus, not toolbar menus.",
-			"usage_perc_y": 0,
-			"usage_perc_a": 14.7,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "contextmenu,menuitem,command"
-		},
-		"rem": {
-			"title": "rem (root em) units",
-			"description": "Type of unit similar to \"em\", but relative only to the root element, not any parent element. Thus compounding does not occur as it does with \"em\" units.",
-			"spec": "http://www.w3.org/TR/css3-values/#font-relative-lengths",
-			"status": "cr",
-			"links": [{
-				"url": "http://snook.ca/archives/html_and_css/font-size-with-rem",
-				"title": "Article on usage"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "u",
-					"5": "u",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 80.56,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"ttf": {
-			"title": "TTF/OTF - TrueType and OpenType font support",
-			"description": "Support for the TrueType (.ttf)and OpenType (.otf) outline font formats in @font-face. ",
-			"spec": "http://developer.apple.com/fonts/TTRefMan/index.html",
-			"status": "other",
-			"links": [{
-				"url": "http://stackoverflow.com/questions/17694143/what-is-the-status-of-ttf-support-in-internet-explorer",
-				"title": "What is the status of TTF support in Internet Explorer?"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "a",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "u"
-				}
-			},
-			"notes": "Partial support in IE9 refers to the fonts only working <a href=\"http://blogs.msdn.com/b/ie/archive/2010/07/15/the-css-corner-better-web-typography-for-better-design.aspx\">when set to be \"installable\"</a>.",
-			"usage_perc_y": 64.48,
-			"usage_perc_a": 16.11,
-			"ucprefix": false,
-			"parent": "fontface",
-			"keywords": ""
-		},
-		"touch": {
-			"title": "Touch events",
-			"description": "Method of registering when, where and how the interface is touched, for devices with a touch screen. These DOM events are similar to mousedown, mousemove, etc.",
-			"spec": "http://www.w3.org/TR/touch-events/",
-			"status": "rec",
-			"links": [{
-				"url": "http://schepers.cc/getintouch",
-				"title": "Information on the spec development"
-			}, {
-				"url": "http://www.quirksmode.org/mobile/tableTouch.html",
-				"title": "Detailed support tables"
-			}, {
-				"url": "http://www.quirksmode.org/m/tests/drag2.html",
-				"title": "Multi-touch demo"
-			}, {
-				"url": "http://msdn.microsoft.com/en-us/library/ie/hh673557(v=vs.85).aspx",
-				"title": "Internet Explorer's gesture and touch implementation."
-			}],
-			"categories": ["DOM", "JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "p",
-					"11": "p"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "a",
-					"5": "a",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "p"
-				}
-			},
-			"notes": "Internet Explorer implements Pointer Events specification which supports more input devices than Touch Events one.",
-			"usage_perc_y": 58.16,
-			"usage_perc_a": 0.12,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "touchstart,touchend,touchmove,touchenter,touchleave,touchcancel"
-		},
-		"matchesselector": {
-			"title": "matches() DOM method",
-			"description": "Method of testing whether or not a DOM element matches a given selector. Formerly known (and largely supported with prefix) as matchesSelector.",
-			"spec": "http://www.w3.org/TR/selectors-api2/",
-			"status": "wd",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/DOM/Element.mozMatchesSelector",
-				"title": "MDN article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/dom/methods/matchesSelector",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["DOM", "JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "a x",
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "a x",
-					"21": "a x",
-					"22": "a x",
-					"23": "a x",
-					"24": "a x",
-					"25": "a x",
-					"26": "a x",
-					"27": "a x"
-				},
-				"chrome": {
-					"4": "a x",
-					"5": "a x",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "a x",
-					"21": "a x",
-					"22": "a x",
-					"23": "a x",
-					"24": "a x",
-					"25": "a x",
-					"26": "a x",
-					"27": "a x",
-					"28": "a x",
-					"29": "a x",
-					"30": "a x",
-					"31": "a x",
-					"32": "a x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "a x",
-					"5.1": "a x",
-					"6": "a x",
-					"6.1": "a x",
-					"7": "a x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "a x",
-					"11.6": "a x",
-					"12": "a x",
-					"12.1": "a x",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "a x",
-					"4.2-4.3": "a x",
-					"5.0-5.1": "a x",
-					"6.0-6.1": "a x",
-					"7.0": "a x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "a x",
-					"2.3": "a x",
-					"3": "a x",
-					"4": "a x",
-					"4.1": "a x",
-					"4.2-4.3": "a x",
-					"4.4": "a x"
-				},
-				"bb": {
-					"7": "a x",
-					"10": "a x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "a x",
-					"11.5": "a x",
-					"12": "a x",
-					"12.1": "a x",
-					"0": "a x"
-				},
-				"and_chr": {
-					"0": "a x"
-				},
-				"and_ff": {
-					"0": "a x"
-				},
-				"ie_mob": {
-					"10": "a x"
-				}
-			},
-			"notes": "Partial support refers to supporting the older specification's \"matchesSelector\" name rather than just \"matches\".",
-			"usage_perc_y": 0,
-			"usage_perc_a": 80.6,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": " matchesSelector"
-		},
-		"pointer-events": {
-			"title": "CSS pointer-events (for HTML)",
-			"description": "This CSS property, when set to \"none\" allows elements to not receive hover/click events, instead the event will occur on anything behind it. ",
-			"spec": "http://wiki.csswg.org/spec/css4-ui#pointer-events",
-			"status": "unoff",
-			"links": [{
-				"url": "http://robertnyman.com/2010/03/22/css-pointer-events-to-allow-clicks-on-underlying-elements/",
-				"title": "Article & tutorial"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/css.js#css-pointerevents",
-				"title": "has.js test"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Already part of the SVG specification, and all SVG-supporting browsers appear to support the property on SVG elements.",
-			"usage_perc_y": 63.82,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "pointerevents"
-		},
-		"blobbuilder": {
-			"title": "Blob constructing",
-			"description": "Construct Blobs (binary large objects) either using the BlobBuilder API (deprecated) or the Blob constructor.",
-			"spec": "http://www.w3.org/TR/file-writer-api/#the-blobbuilder-interface",
-			"status": "wd",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/DOM/BlobBuilder",
-				"title": "MDN article on BlobBuilder"
-			}, {
-				"url": "https://developer.mozilla.org/en-US/docs/DOM/Blob",
-				"title": "MDN article on Blobs"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "a x",
-					"7": "a x",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "a x",
-					"4": "a x",
-					"4.1": "a x",
-					"4.2-4.3": "a x",
-					"4.4": "a x"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "a x"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support refers to only supporting the now deprecated BlobBuilder to create blobs.",
-			"usage_perc_y": 64.97,
-			"usage_perc_a": 6.3,
-			"ucprefix": true,
-			"parent": "fileapi",
-			"keywords": ""
-		},
-		"filereader": {
-			"title": "FileReader API",
-			"description": "Method of reading the contents of a File or Blob object into memory",
-			"spec": "http://www.w3.org/TR/FileAPI/#dfn-filereader",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/apis/file/FileReader",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://developer.mozilla.org/en/DOM/FileReader",
-				"title": "FileReader API"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 71.89,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "fileapi",
-			"keywords": ""
-		},
-		"filesystem": {
-			"title": "Filesystem & FileWriter API",
-			"description": "Method of reading and writing files to a sandboxed file system.\r\n",
-			"spec": "http://www.w3.org/TR/file-system-api/",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/apis/filesystem",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://www.html5rocks.com/en/tutorials/file/filesystem/",
-				"title": "HTML5 Rocks tutorial"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "a x",
-					"9": "a x",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 34.87,
-			"usage_perc_a": 0.28,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "filewriter"
-		},
-		"bloburls": {
-			"title": "Blob URLs",
-			"description": "Method of creating URL handles to the specified File or Blob object.",
-			"spec": "http://www.w3.org/TR/FileAPI/#url",
-			"status": "wd",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/DOM/window.URL.createObjectURL",
-				"title": "MDN article"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "y x",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "y x",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 70.6,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "fileapi",
-			"keywords": "createobjecturl"
-		},
-		"typedarrays": {
-			"title": "Typed Arrays",
-			"description": "JavaScript typed arrays provide a mechanism for accessing raw binary data much more efficiently.\r\n",
-			"spec": "http://www.khronos.org/registry/typedarray/specs/latest/",
-			"status": "other",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/javascript_typed_arrays",
-				"title": "MDN article"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 73.11,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "float64array,dataview,uint8array"
-		},
-		"deviceorientation": {
-			"title": "DeviceOrientation events",
-			"description": "API for detecting orientation and motion events from the device running the browser.",
-			"spec": "http://www.w3.org/TR/orientation-event/",
-			"status": "wd",
-			"links": [{
-				"url": "http://html5labs.interoperabilitybridges.com/prototypes/device-orientation-events/device-orientation-events/info",
-				"title": "DeviceOrientation implementation prototype for IE10"
-			}, {
-				"url": "http://www.html5rocks.com/en/tutorials/device/orientation/",
-				"title": "HTML5 Rocks tutorial"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/features.js#native-orientation",
-				"title": "has.js test"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "p",
-					"4": "p",
-					"5": "p",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a",
-					"28": "a",
-					"29": "a",
-					"30": "a",
-					"31": "a",
-					"32": "a"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "a",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "a",
-					"4": "a",
-					"4.1": "a",
-					"4.2-4.3": "a",
-					"4.4": "a"
-				},
-				"bb": {
-					"7": "n",
-					"10": "a"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "y",
-					"12.1": "y",
-					"0": "a"
-				},
-				"and_chr": {
-					"0": "a"
-				},
-				"and_ff": {
-					"0": "a"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Partial support refers to the lack of compassneedscalibration event. Partial support also refers to the lack of devicemotion event support for Chrome 30- and Opera. Opera Mobile 14 lost the ondevicemotion event support. Firefox 3.6, 4 and 5 support the non-standard <a href=\"https://developer.mozilla.org/en/DOM/MozOrientation\">MozOrientation</a> event.",
-			"usage_perc_y": 0.14,
-			"usage_perc_a": 57.76,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"script-defer": {
-			"title": "defer attribute for external scripts",
-			"description": "The boolean defer attribute on script elements allows the external JavaScript file to run when the DOM is loaded, without delaying page load first.",
-			"spec": "http://www.w3.org/TR/html5/the-script-element.html#attr-script-defer",
-			"status": "cr",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/HTML/Element/script#Attributes",
-				"title": "MDN article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/attributes/defer",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/script.js#script-defer",
-				"title": "has.js test"
-			}],
-			"categories": ["DOM", "HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support refers to a buggy implementation in IE<10",
-			"usage_perc_y": 73.17,
-			"usage_perc_a": 14.25,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"nav-timing": {
-			"title": "Navigation Timing API",
-			"description": "API for accessing timing information related to navigation and elements.",
-			"spec": "http://www.w3.org/TR/navigation-timing/",
-			"status": "cr",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/API/navigationTiming",
-				"title": "MDN article"
-			}, {
-				"url": "http://www.html5rocks.com/en/tutorials/webperformance/basics/",
-				"title": "HTML5 Rocks tutorial"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/navigation_timing",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["DOM", "JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 69.95,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "performance,performance.timing"
-		},
-		"audio-api": {
-			"title": "Web Audio API",
-			"description": "High-level JavaScript API for processing and synthesizing audio",
-			"spec": "http://www.w3.org/TR/webaudio/",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.doboism.com/projects/webaudio-compatibility/",
-				"title": "Additional browser compatibility tests for specific features"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/webaudio",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://github.com/corbanbrook/audionode.js",
-				"title": "Polyfill to support Web Audio API in Firefox"
-			}, {
-				"url": "https://github.com/g200kg/WAAPISim",
-				"title": "Polyfill to enable Web Audio API through Firefox Audio Data api or flash"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Firefox versions < 25 support an alternative, deprecated audio API.",
-			"usage_perc_y": 41.68,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "web-audio"
-		},
-		"css-regions": {
-			"title": "CSS Regions",
-			"description": "Method of flowing content into multiple elements.",
-			"spec": "http://www.w3.org/TR/css3-regions/",
-			"status": "wd",
-			"links": [{
-				"url": "http://msdn.microsoft.com/en-us/ie/hh272902#_CSSConnected",
-				"title": "IE10 developer guide info"
-			}, {
-				"url": "http://html.adobe.com/webstandards/cssregions/",
-				"title": "Adobe demos and samples"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/atrules/@region",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "a x",
-					"11": "a x"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "n",
-					"31": "n",
-					"32": "n"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "a x"
-				}
-			},
-			"notes": "Currently supported in WebKit Nightly using <code>-webkit-flow-into: flow_name;</code> and <code>-webkit-from-flow: flow_name;</code>. Support in Chrome 19+ is disabled by default and can be enabled using a runtime flag (see <code>about:flags</code>) or a command line flag (see  <a href=\"http://peter.sh/experiments/chromium-command-line-switches/#enable-css-regions\">this list</a>). For Chrome 19-22 the flag is named \"Enable CSS Regions\" / <code>--enable-css-regions</code>, while for Chrome 23+ the flag is named \"Enable experimental WebKit features\" / <code>--enable-experimental-webkit-features</code>. Support in IE10 is limited to using an iframe as a content source with the <code>-ms-flow-into: flow_name;</code> and <code>-ms-flow-from: flow_name;</code> syntax. Support for Safari 6.1&7 is <a href=\"http://www.broken-links.com/2013/07/10/web-platform-technologies-in-safari-6-1-and-7/\">likely</a> but not official.",
-			"usage_perc_y": 2.75,
-			"usage_perc_a": 11.35,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"fullscreen": {
-			"title": "Full Screen API",
-			"description": "API for allowing content (like a video or canvas element) to take up the entire screen.",
-			"spec": "http://www.w3.org/TR/fullscreen/",
-			"status": "wd",
-			"links": [{
-				"url": "https://developer.mozilla.org/en/DOM/Using_full-screen_mode",
-				"title": "MDN article"
-			}, {
-				"url": "http://jlongster.com/2011/11/21/canvas.html",
-				"title": "Blog post"
-			}, {
-				"url": "http://hacks.mozilla.org/2012/01/using-the-fullscreen-api-in-web-browsers/",
-				"title": "Mozilla hacks article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/dom/methods/requestFullscreen",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "y x"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "a x",
-					"11": "a x",
-					"12": "a x",
-					"13": "a x",
-					"14": "a x",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "a x",
-					"21": "a x",
-					"22": "a x",
-					"23": "a x",
-					"24": "a x",
-					"25": "a x",
-					"26": "a x",
-					"27": "a x"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "a x",
-					"16": "a x",
-					"17": "a x",
-					"18": "a x",
-					"19": "a x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "a x",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "y",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "a"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "a x"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Partial support refers to supporting an earlier draft of the spec.",
-			"usage_perc_y": 37.35,
-			"usage_perc_a": 16.21,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "full-screen"
-		},
-		"requestanimationframe": {
-			"title": "requestAnimationFrame",
-			"description": "API allowing a more efficient way of running script-based animation, compared to traditional methods using timeouts.",
-			"spec": "http://www.w3.org/TR/animation-timing/#requestAnimationFrame",
-			"status": "wd",
-			"links": [{
-				"url": "http://hacks.mozilla.org/2011/08/animating-with-javascript-from-setinterval-to-requestanimationframe/",
-				"title": "Mozilla Hacks article"
-			}, {
-				"url": "http://paulirish.com/2011/requestanimationframe-for-smart-animating/",
-				"title": "Blog post"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/timing/methods/requestAnimationFrame",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "y x",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "y x",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 67.13,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"input-range": {
-			"title": "Range input type",
-			"description": "Form field type that allows the user to select a value using a slider widget.",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/states-of-the-type-attribute.html#range-state-(type=range)",
-			"status": "wd",
-			"links": [{
-				"url": "https://github.com/fryn/html5slider",
-				"title": "Polyfill for Firefox"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/elements/input/type/range",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://tutorialzine.com/2011/12/what-you-need-to-know-html5-range-input/",
-				"title": "Tutorial"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/form.js#input-type-range",
-				"title": "has.js test"
-			}, {
-				"url": "https://github.com/freqdec/fd-slider",
-				"title": "Cross-browser polyfill"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "u",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a",
-					"2.2": "a",
-					"2.3": "a",
-					"3": "a",
-					"4": "a",
-					"4.1": "a",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Currently all Android browsers with partial support hide the slider input field by default. However, the element <a href=\"http://tiffanybbrown.com/2012/02/07/input-typerange-and-androids-stock-browser/\">can be styled</a> to be made visible and usable.",
-			"usage_perc_y": 68.52,
-			"usage_perc_a": 4.31,
-			"ucprefix": false,
-			"parent": "forms",
-			"keywords": ""
-		},
-		"matchmedia": {
-			"title": "matchMedia",
-			"description": "API for finding out whether or not a media query applies to the document.",
-			"spec": "http://www.w3.org/TR/cssom-view/#dom-window-matchmedia",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/media_queries/apis/matchMedia",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://github.com/paulirish/matchMedia.js/",
-				"title": "matchMedia.js polyfill"
-			}, {
-				"url": "https://developer.mozilla.org/en/DOM/window.matchMedia",
-				"title": "MDN article"
-			}, {
-				"url": "https://developer.mozilla.org/en/CSS/Using_media_queries_from_code",
-				"title": "MDN tutorial"
-			}],
-			"categories": ["JS API", "DOM"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 72.81,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "mediaquerylist"
-		},
-		"input-datetime": {
-			"title": "Date/time input types",
-			"description": "Form field widget to easily allow users to enter dates and/or times, generally by using a calendar widget.",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/states-of-the-type-attribute.html#date-state-(type=date)",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/html/elements/input/type/date",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://net.tutsplus.com/tutorials/javascript-ajax/quick-tip-cross-browser-datepickers-within-minutes/",
-				"title": "Datepicker tutorial w/polyfill"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/form.js#input-type-datetime;input-type-datetime-local",
-				"title": "has.js test"
-			}, {
-				"url": "https://github.com/zoltan-dulac/html5Forms.js",
-				"title": "Polyfill for HTML5 forms"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a",
-					"28": "a",
-					"29": "a",
-					"30": "a",
-					"31": "a",
-					"32": "a"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "a"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Safari provides date-formatted text fields, but no real calendar widget. Partial support in Chrome refers to a missing calendar widget for the \"datetime\" type (and other types in older versions). Some modified versions of the Android 4.x browser do have support for date/time fields. ",
-			"usage_perc_y": 6.13,
-			"usage_perc_a": 33.1,
-			"ucprefix": false,
-			"parent": "forms",
-			"keywords": "datepicker,timepicker"
-		},
-		"input-color": {
-			"title": "Color input type",
-			"description": "Form field allowing the user to select a color.",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/states-of-the-type-attribute.html#color-state-(type=color)",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/html/elements/input/type/color",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://www.html5tutorial.info/html5-color.php",
-				"title": "Tutorial"
-			}, {
-				"url": "https://github.com/jonstipe/color-polyfill",
-				"title": "Polyfill"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "n",
-					"16": "n",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 35.22,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "forms",
-			"keywords": "colour"
-		},
-		"input-number": {
-			"title": "Number input type",
-			"description": "Form field type for numbers.",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/states-of-the-type-attribute.html#number-state-(type=number)",
-			"status": "wd",
-			"links": [{
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/form.js#input-type-number",
-				"title": "has.js test"
-			}, {
-				"url": "http://www.html5tutorial.info/html5-number.php",
-				"title": "Tutorial"
-			}, {
-				"url": "https://github.com/jonstipe/number-polyfill",
-				"title": "Polyfill"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/elements/input/type/number",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "a",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "u",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "a",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "a",
-					"4.1": "a",
-					"4.2-4.3": "a",
-					"4.4": "a"
-				},
-				"bb": {
-					"7": "n",
-					"10": "a"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "a"
-				},
-				"and_chr": {
-					"0": "a"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "iOS Safari, Android 4 and Chrome for Android show number input, but do not use \"step\", \"min\" or \"max\" attributes or show increment/decrement buttons. Internet Explorer 10 does not show increment/decrement buttons.",
-			"usage_perc_y": 38.44,
-			"usage_perc_a": 20.1,
-			"ucprefix": false,
-			"parent": "forms",
-			"keywords": "spinner"
-		},
-		"iframe-sandbox": {
-			"title": "sandbox attribute for iframes",
-			"description": "Method of running external site pages with reduced privileges (e.g. no JavaScript) in iframes",
-			"spec": "http://www.w3.org/TR/html5/the-iframe-element.html#attr-iframe-sandbox",
-			"status": "cr",
-			"links": [{
-				"url": "http://msdn.microsoft.com/en-us/hh563496",
-				"title": "MSDN article"
-			}, {
-				"url": "http://blog.chromium.org/2010/05/security-in-depth-html5s-sandbox.html",
-				"title": "Chromium blog article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/html/attributes/sandbox",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 59.45,
-			"usage_perc_a": 13.57,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"css-counters": {
-			"title": "CSS Counters",
-			"description": "Method of controlling number values in generated content, using the counter-reset and counter-increment properties.",
-			"spec": "http://www.w3.org/TR/CSS21/generate.html#counters",
-			"status": "wd",
-			"links": [{
-				"url": "http://onwebdev.blogspot.com/2012/02/css-counters-tutorial.html",
-				"title": "Tutorial and information"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/properties/counter-reset",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://developer.mozilla.org/en/CSS_Counters",
-				"title": "MDN article"
-			}],
-			"categories": ["CSS2"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "y"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 93.86,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"css-resize": {
-			"title": "CSS resize property",
-			"description": "Method of allowing an element to be resized by the user, with options to limit to a given direction. ",
-			"spec": "http://www.w3.org/TR/css3-ui/#resize",
-			"status": "wd",
-			"links": [{
-				"url": "http://css-tricks.com/almanac/properties/r/resize/",
-				"title": "CSS Tricks info"
-			}, {
-				"url": "http://davidwalsh.name/textarea-resize",
-				"title": "On textarea resizing"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y x",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "a",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Opera 12.10+ currently only supports the resize property for textarea elements.",
-			"usage_perc_y": 52.82,
-			"usage_perc_a": 0.48,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "horizontal,vertical"
-		},
-		"input-placeholder": {
-			"title": "input placeholder attribute",
-			"description": "Method of setting placeholder text for text-like input fields, to suggest the expected inserted information.",
-			"spec": "http://dev.w3.org/html5/spec/Overview.html#attr-input-placeholder",
-			"status": "cr",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/html/attributes/placeholder",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://raw.github.com/phiggins42/has.js/master/detect/form.js#input-attr-placeholder",
-				"title": "has.js test"
-			}, {
-				"url": "http://www.zachleat.com/web/placeholder/",
-				"title": "Article on usage"
-			}, {
-				"url": "https://github.com/mathiasbynens/jquery-placeholder",
-				"title": "Polyfill"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a",
-					"3.2": "a",
-					"4": "a",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "a",
-					"11.1": "a",
-					"11.5": "a",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support in older Safari and Opera versions refers to lacking placeholder support on textarea elements. ",
-			"usage_perc_y": 75.1,
-			"usage_perc_a": 0.15,
-			"ucprefix": false,
-			"parent": "forms",
-			"keywords": ""
-		},
-		"spdy": {
-			"title": "SPDY networking protocol",
-			"description": "Networking protocol for low-latency transport of content over the web.",
-			"spec": "http://tools.ietf.org/html/draft-mbelshe-httpbis-spdy-00",
-			"status": "unoff",
-			"links": [{
-				"url": "http://en.wikipedia.org/wiki/SPDY",
-				"title": "Wikipedia"
-			}, {
-				"url": "http://dev.chromium.org/spdy/spdy-whitepaper",
-				"title": "SPDY whitepaper"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "a"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "u"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 53.69,
-			"usage_perc_a": 0.11,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"css-repeating-gradients": {
-			"title": "CSS Repeating Gradients",
-			"description": "Method of defining a repeating linear or radial color gradient as a CSS image.",
-			"spec": "http://www.w3.org/TR/css3-images/#repeating-gradients",
-			"status": "cr",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/repeating-linear-gradient",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://developer.mozilla.org/en/CSS/repeating-linear-gradient",
-				"title": "MDN article"
-			}, {
-				"url": "http://www.css3files.com/gradient/#repeatinglineargradient",
-				"title": "Information page"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "y x",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "a x",
-					"11.5": "a x",
-					"11.6": "y x",
-					"12": "y x",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "a x",
-					"11.5": "a x",
-					"12": "y x",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Firefox 10+, Chrome 26+ and Opera 11.6+ also support the new \"to (side)\" syntax.",
-			"usage_perc_y": 73.31,
-			"usage_perc_a": 0.03,
-			"ucprefix": false,
-			"parent": "css-gradients",
-			"keywords": ""
-		},
-		"css-filters": {
-			"title": "CSS Filter Effects",
-			"description": "Method of applying filter effects (like blur, grayscale, brightness, contrast and hue) to elements, previously only possible by using SVG.",
-			"spec": "http://www.w3.org/TR/filter-effects/",
-			"status": "wd",
-			"links": [{
-				"url": "http://dl.dropbox.com/u/3260327/angular/CSS3ImageManipulation.html",
-				"title": "Filter editor"
-			}, {
-				"url": "http://bennettfeely.com/filters/",
-				"title": "Filter Playground"
-			}, {
-				"url": "http://html5-demos.appspot.com/static/css/filters/index.html",
-				"title": "Demo file for WebKit browsers"
-			}, {
-				"url": "http://www.html5rocks.com/en/tutorials/filters/understanding-css/",
-				"title": "Mozilla hacks article"
-			}],
-			"categories": ["CSS3", "CSS"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "u",
-					"27": "u"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Note that this property is significantly different from and incompatible with Microsoft's <a href=\"http://msdn.microsoft.com/en-us/library/ie/ms530752%28v=vs.85%29.aspx\">older \"filter\" property</a>.",
-			"usage_perc_y": 40.55,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "sepia,hue-rotate,invert,saturate"
-		},
-		"getcomputedstyle": {
-			"title": "getComputedStyle",
-			"description": "API to get the current computed CSS styles applied to an element. This may be the current value applied by an animation or as set by a stylesheet.",
-			"spec": "http://www.w3.org/TR/cssom/#dom-window-getcomputedstyle",
-			"status": "rec",
-			"links": [{
-				"url": "http://ie.microsoft.com/testdrive/HTML5/getComputedStyle/",
-				"title": "Demo"
-			}, {
-				"url": "http://snipplr.com/view/13523/",
-				"title": "Polyfill for IE"
-			}, {
-				"url": "https://developer.mozilla.org/en/DOM/window.getComputedStyle",
-				"title": "MDN article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/css/cssom/methods/getComputedStyle",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["JS API", "CSS3", "DOM"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "a",
-					"3.5": "a",
-					"3.6": "a",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "a",
-					"3.2": "a",
-					"4": "a",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "a",
-					"9.5-9.6": "a",
-					"10.0-10.1": "a",
-					"10.5": "a",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "a",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "a"
-				},
-				"android": {
-					"2.1": "a",
-					"2.2": "a",
-					"2.3": "a",
-					"3": "a",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "a",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "a",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support in older Firefox versions refers to requiring the second parameter to be included. Partial support in all other browsers refers to not supporting getComputedStyle on pseudo-elements.",
-			"usage_perc_y": 78.53,
-			"usage_perc_a": 7,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"word-break": {
-			"title": "CSS3 word-break",
-			"description": "Property to prevent or allow words to be broken over multiple lines between letters.",
-			"spec": "http://www.w3.org/TR/css3-text/#word-break",
-			"status": "wd",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/properties/word-break",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "https://developer.mozilla.org/en/CSS/word-break",
-				"title": "MDN article"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "a",
-					"5": "a",
-					"6": "a",
-					"7": "a",
-					"8": "a",
-					"9": "a",
-					"10": "a",
-					"11": "a",
-					"12": "a",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a",
-					"28": "a",
-					"29": "a",
-					"30": "a",
-					"31": "a",
-					"32": "a"
-				},
-				"safari": {
-					"3.1": "a",
-					"3.2": "a",
-					"4": "a",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a"
-				},
-				"ios_saf": {
-					"3.2": "a",
-					"4.0-4.1": "a",
-					"4.2-4.3": "a",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "a",
-					"2.2": "a",
-					"2.3": "a",
-					"3": "a",
-					"4": "a",
-					"4.1": "a",
-					"4.2-4.3": "a",
-					"4.4": "a"
-				},
-				"bb": {
-					"7": "a",
-					"10": "a"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "a"
-				},
-				"and_chr": {
-					"0": "a"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "Partial support refers to supporting the \"break-all\" value, but not the \"keep-all\" value.",
-			"usage_perc_y": 39.39,
-			"usage_perc_a": 48.42,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "break-all,keep-all"
-		},
-		"viewport-units": {
-			"title": "Viewport units: vw, vh, vmin, vmax",
-			"description": "Length units representing 1% of the viewport size for viewport width (vw), height (vh), the smaller of the two (vmin), or the larger of the two (vmax).",
-			"spec": "http://www.w3.org/TR/css3-values/#viewport-relative-lengths",
-			"status": "cr",
-			"links": [{
-				"url": "http://css-tricks.com/viewport-sized-typography/",
-				"title": "Blog post"
-			}, {
-				"url": "https://github.com/saabi/vminpoly",
-				"title": "Polyfill"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "a",
-					"10": "a",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "a",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "a"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "a"
-				}
-			},
-			"notes": "Partial support in IE9 refers to supporting \"vm\" instead of \"vmin\". All other partial support refers to not supporting the \"vmax\" unit.",
-			"usage_perc_y": 48.9,
-			"usage_perc_a": 21.18,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "vm,viewport-percentage"
-		},
-		"contentsecuritypolicy": {
-			"title": "Content Security Policy",
-			"description": "Mitigate cross-site scripting attacks by whitelisting allowed sources of script, style, and other resources.",
-			"spec": "http://www.w3.org/TR/CSP/",
-			"status": "cr",
-			"links": [{
-				"url": "http://content-security-policy.com/",
-				"title": "CSP Examples & Quick Reference"
-			}, {
-				"url": "http://html5rocks.com/en/tutorials/security/content-security-policy/",
-				"title": "HTML5Rocks article"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "a x",
-					"11": "a x"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "a x",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "a x",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "a x"
-				}
-			},
-			"notes": "The HTTP header is 'X-Content-Security-Policy' for Firefox and IE 10&11, and 'X-WebKit-CSP' for Safari and Chrome. IE 10&11's support is limited to the 'sandbox' directive.",
-			"usage_perc_y": 55.74,
-			"usage_perc_a": 12.68,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "csp,security,header"
-		},
-		"pagevisibility": {
-			"title": "PageVisibility",
-			"description": "JavaScript API for determining whether a document is visible on the display",
-			"spec": "http://www.w3.org/TR/page-visibility/",
-			"status": "cr",
-			"links": [{
-				"url": "https://developer.mozilla.org/en-US/docs/DOM/Using_the_Page_Visibility_API",
-				"title": "MDN article"
-			}, {
-				"url": "http://docs.webplatform.org/wiki/apis/timing/properties/visibilityState",
-				"title": "WebPlatform Docs"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "y",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "y",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 63.89,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "visibilitystate"
-		},
-		"stricttransportsecurity": {
-			"title": "Strict Transport Security",
-			"description": "Declare that a website is only accessible over a secure connection (HTTPS).",
-			"spec": "http://tools.ietf.org/html/rfc6797",
-			"status": "other",
-			"links": [{
-				"url": "http://dev.chromium.org/sts",
-				"title": "Strict Transport Security @ Chromium"
-			}, {
-				"url": "https://developer.mozilla.org/en-US/docs/Security/HTTP_Strict_Transport_Security",
-				"title": "Strict Transport Security @ Mozilla Developer Network"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "u"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "The HTTP header is 'Strict-Transport-Security'.",
-			"usage_perc_y": 50.76,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "sts,hsts,security,header"
-		},
-		"style-scoped": {
-			"title": "Scoped CSS",
-			"description": "Allows CSS rules to be scoped to part of the document, based on the position of the style element.",
-			"spec": "http://www.w3.org/TR/html5/document-metadata.html#attr-style-scoped",
-			"status": "cr",
-			"links": [{
-				"url": "https://github.com/PM5544/scoped-polyfill",
-				"title": "Polyfill"
-			}, {
-				"url": "http://html5doctor.com/the-scoped-attribute/",
-				"title": "HTML5 Doctor article"
-			}, {
-				"url": "http://updates.html5rocks.com/2012/03/A-New-Experimental-Feature-style-scoped",
-				"title": "HTML5Rocks article"
-			}],
-			"categories": ["CSS", "HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "n",
-					"31": "u",
-					"32": "u"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "u",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Supported in Chrome 20+ by enabling the \"experimental WebKit features\" flag in chrome://flags.",
-			"usage_perc_y": 13.05,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "scope"
-		},
-		"svg-fragment": {
-			"title": "SVG fragment identifiers",
-			"description": "Method of displaying only a part of an SVG image by defining a view ID or view box dimensions as the file's fragment identifier.",
-			"spec": "http://www.w3.org/TR/SVG/linking.html#SVGFragmentIdentifiers",
-			"status": "rec",
-			"links": [{
-				"url": "http://www.broken-links.com/2012/08/14/better-svg-sprites-with-fragment-identifiers/",
-				"title": "Blog post"
-			}],
-			"categories": ["SVG"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "n",
-					"31": "u",
-					"32": "u"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "u",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 25.15,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "fragments,sprite"
-		},
-		"outline": {
-			"title": "CSS outline",
-			"description": "The CSS outline property is a shorthand property for setting one or more of the individual outline properties outline-style, outline-width and outline-color in a single rule. In most cases the use of this shortcut is preferable and more convenient.",
-			"spec": "http://www.w3.org/TR/CSS2/ui.html#propdef-outline",
-			"status": "rec",
-			"links": [{
-				"url": "https://developer.mozilla.org/en-US/docs/CSS/outline",
-				"title": "Mozilla Developer Network: outline"
-			}, {
-				"url": "http://dev.w3.org/csswg/css3-ui/#outline",
-				"title": "CSS Basic User Interface Module Level 3"
-			}],
-			"categories": ["CSS2"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y",
-					"3": "y",
-					"3.5": "y",
-					"3.6": "y",
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "y",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "y",
-					"4.0-4.1": "y",
-					"4.2-4.3": "y",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y",
-					"2.2": "y",
-					"2.3": "y",
-					"3": "y",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 89.27,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "-moz-outline,outline-width,outline-style,outline-color"
-		},
-		"download": {
-			"title": "Download attribute",
-			"description": "When used on an anchor, this attribute signifies that the resource it points to should be downloaded by the browser rather than navigate to it.",
-			"spec": "http://www.whatwg.org/specs/web-apps/current-work/multipage/links.html#downloading-resources",
-			"status": "wd",
-			"links": [{
-				"url": "http://html5-demos.appspot.com/static/a.download.html",
-				"title": "Demo: creating a text file and downloading it."
-			}, {
-				"url": "http://updates.html5rocks.com/2011/08/Downloading-resources-in-HTML5-a-download",
-				"title": "HTML5Rocks post"
-			}],
-			"categories": ["HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 48.02,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "download,a.download,a[download],download attribute"
-		},
-		"pointer": {
-			"title": "Pointer events",
-			"description": "This specification integrates various inputs from mice, touchscreens, and pens, making separate implementations no longer necessary and authoring for cross-device pointers easier. Not to be mistaken with the unrelated \"pointer-events\" CSS property.",
-			"spec": "http://www.w3.org/TR/pointerevents/",
-			"status": "cr",
-			"links": [{
-				"url": "http://blogs.msdn.com/b/eternalcoding/archive/2013/01/16/hand-js-a-polyfill-for-supporting-pointer-events-on-every-browser.aspx",
-				"title": "Hand.js, the polyfill for browsers only supporting Touch Events"
-			}, {
-				"url": "http://blogs.msdn.com/b/ie/archive/2011/09/20/touch-input-for-ie10-and-metro-style-apps.aspx",
-				"title": "Implementation of Pointer Events in IE10"
-			}, {
-				"url": "http://blogs.msdn.com/b/davrous/archive/2013/02/20/handling-touch-in-your-html5-apps-thanks-to-the-pointer-events-of-ie10-and-windows-8.aspx",
-				"title": "Article & tutorial"
-			}],
-			"categories": ["DOM", "JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "a x",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "p",
-					"12": "p",
-					"13": "p",
-					"14": "p",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p",
-					"19": "p",
-					"20": "p",
-					"21": "p",
-					"22": "p",
-					"23": "p",
-					"24": "p",
-					"25": "p",
-					"26": "p",
-					"27": "p"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "p",
-					"23": "p",
-					"24": "p",
-					"25": "p",
-					"26": "p",
-					"27": "p",
-					"28": "p",
-					"29": "p",
-					"30": "p",
-					"31": "p",
-					"32": "p"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p"
-				},
-				"ios_saf": {
-					"3.2": "p",
-					"4.0-4.1": "p",
-					"4.2-4.3": "p",
-					"5.0-5.1": "p",
-					"6.0-6.1": "p",
-					"7.0": "p"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "p",
-					"2.2": "p",
-					"2.3": "p",
-					"3": "p",
-					"4": "p",
-					"4.1": "p",
-					"4.2-4.3": "p",
-					"4.4": "p"
-				},
-				"bb": {
-					"7": "p",
-					"10": "p"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"12": "p",
-					"12.1": "p",
-					"0": "p"
-				},
-				"and_chr": {
-					"0": "p"
-				},
-				"and_ff": {
-					"0": "p"
-				},
-				"ie_mob": {
-					"10": "a x"
-				}
-			},
-			"notes": "Partial support in IE10 refers the lack of pointerenter and pointerleave events.",
-			"usage_perc_y": 0.11,
-			"usage_perc_a": 10.99,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "pointerdown,pointermove,pointerup,pointercancel,pointerover,pointerout,pointerenter,pointerleave"
-		},
-		"user-select-none": {
-			"title": "CSS user-select: none",
-			"description": "Method of preventing text/element selection using CSS. ",
-			"spec": "https://developer.mozilla.org/en-US/docs/CSS/user-select",
-			"status": "unoff",
-			"links": [{
-				"url": "http://msdn.microsoft.com/en-us/library/ie/hh781492(v=vs.85).aspx",
-				"title": "MSDN Documentation"
-			}, {
-				"url": "https://developer.mozilla.org/en-US/docs/CSS/user-select",
-				"title": "MDN article"
-			}, {
-				"url": "http://css-tricks.com/almanac/properties/u/user-select/",
-				"title": "CSS Tricks article"
-			}],
-			"categories": ["CSS"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y x",
-					"11": "y x"
-				},
-				"firefox": {
-					"2": "y x",
-					"3": "y x",
-					"3.5": "y x",
-					"3.6": "y x",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x"
-				},
-				"chrome": {
-					"4": "u",
-					"5": "u",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "y x",
-					"3.2": "y x",
-					"4": "y x",
-					"5": "y x",
-					"5.1": "y x",
-					"6": "y x",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "y x",
-					"4.0-4.1": "y x",
-					"4.2-4.3": "y x",
-					"5.0-5.1": "y x",
-					"6.0-6.1": "y x",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "y x",
-					"2.2": "y x",
-					"2.3": "y x",
-					"3": "y x",
-					"4": "y x",
-					"4.1": "y x",
-					"4.2-4.3": "y x",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "y x",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "y x"
-				}
-			},
-			"notes": "Currently the user-select property does not appear in any W3C specification. Support information here is only for \"none\" value, not others.",
-			"usage_perc_y": 74.91,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"webp": {
-			"title": "WebP image format",
-			"description": "Image format that supports lossy and lossless compression, as well as animation and alpha transparency.",
-			"spec": "https://developers.google.com/speed/webp/",
-			"status": "other",
-			"links": [{
-				"url": "http://libwebpjs.appspot.com/",
-				"title": "Decoder in JS"
-			}, {
-				"url": "https://developers.google.com/speed/webp/",
-				"title": "Official website"
-			}, {
-				"url": "http://antimatter15.github.io/weppy/demo.html",
-				"title": "Polyfill for browsers with WebM support"
-			}, {
-				"url": "http://webpjs.appspot.com/",
-				"title": "Polyfill for browsers with or without WebM support (i.e. IE6-IE9, Safari/iOS version 6.1 and below; Firefox versions 24 and bel"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "p",
-					"5": "p",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "p",
-					"10": "p",
-					"11": "p",
-					"12": "p",
-					"13": "p",
-					"14": "p",
-					"15": "p",
-					"16": "p",
-					"17": "p",
-					"18": "p",
-					"19": "p",
-					"20": "p",
-					"21": "p",
-					"22": "p",
-					"23": "p",
-					"24": "p",
-					"25": "p",
-					"26": "p",
-					"27": "p"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "p",
-					"7": "p",
-					"8": "p",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "p",
-					"11": "p",
-					"11.1": "p",
-					"11.5": "p",
-					"11.6": "p",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "y",
-					"4.1": "y",
-					"4.2-4.3": "y",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "a",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Animated webp images are supported in Chrome 32+ and Opera 19+.",
-			"usage_perc_y": 39.4,
-			"usage_perc_a": 0.01,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"intrinsic-width": {
-			"title": "Intrinsic & Extrinsic Sizing",
-			"description": "Allows for the heights and widths to be specified in intrinsic values using the fill-available, max-content, min-content, and fit-content properties.",
-			"spec": "http://www.w3.org/TR/css3-sizing/",
-			"status": "wd",
-			"links": [{
-				"url": "http://demosthenes.info/blog/662/Design-From-the-Inside-Out-With-CSS-MinContent",
-				"title": "Min-Content tutorial"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "y x",
-					"7": "y x"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "y x"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y x"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Prefixes are on the values, not the property names (e.g. -webkit-min-content) Firefox currently supports the \"-moz-available\" property rather than \"-moz-fill-available\".",
-			"usage_perc_y": 51.68,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "fill-available,max-content,min-content,fit-content,contain-floats"
-		},
-		"template": {
-			"title": "HTML templates",
-			"description": "Method of declaring a portion of reusable markup that is parsed but not rendered until cloned.",
-			"spec": "http://www.w3.org/TR/html-templates/",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.html5rocks.com/en/tutorials/webcomponents/template/",
-				"title": "HTML5Rocks - HTML's New template Tag"
-			}, {
-				"url": "http://polymer-project.org",
-				"title": "Polymer project (polyfill & web compontents framework)"
-			}],
-			"categories": ["DOM", "HTML5"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 45.76,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "web components, template"
-		},
-		"opus": {
-			"title": "Opus",
-			"description": "Royalty-free open audio codec by IETF, which incorporated SILK from Skype and CELT from Xiph.org, to serve higher sound quality and lower latency at the same bitrate.",
-			"spec": "http://tools.ietf.org/html/rfc6716",
-			"status": "other",
-			"links": [{
-				"url": "https://hacks.mozilla.org/2012/07/firefox-beta-15-supports-the-new-opus-audio-format/",
-				"title": "Introduction of Opus by Mozilla"
-			}, {
-				"url": "http://www.ietf.org/mail-archive/web/rtcweb/current/msg04953.html",
-				"title": "Google's statement about the use of VP8 and Opus codec for WebRTC standard"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "n",
-					"31": "n",
-					"32": "n"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "u"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Chrome does not support Opus by default but users can enable it via the 'enable-opus-playback' flag. When it comes to Opera, it is said that the Linux version may be able to play it when the GStreamer module is up to date and the served mime-type is 'audio/ogg'.",
-			"usage_perc_y": 14.04,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "audio",
-			"keywords": ""
-		},
-		"jpegxr": {
-			"title": "JPEG XR image format",
-			"description": "The latest JPEG image format of Joint Photographic Experts Group which boasts better compression and supports lossless compression, alpha channel, and 48-bit deep color over normal jpg format.",
-			"spec": "http://www.itu.int/rec/T-REC-T.832",
-			"status": "other",
-			"links": [{
-				"url": "http://msdn.microsoft.com/en-us/library/windows/desktop/hh707223(v=vs.85).aspx",
-				"title": "Microsoft JPEG XR Codec Overview"
-			}],
-			"categories": ["Other"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "n",
-					"31": "n",
-					"32": "n"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "n",
-					"7": "n"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "n"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 16.32,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		},
-		"channel-messaging": {
-			"title": "Channel messaging",
-			"description": "Method for having two-way communication between browsing contexts (using MessageChannel)",
-			"spec": "http://www.w3.org/TR/webmessaging/#channel-messaging",
-			"status": "cr",
-			"links": [{
-				"url": "http://dev.opera.com/articles/view/window-postmessage-messagechannel/#channel",
-				"title": "An Introduction to HTML5 web messaging"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "u",
-					"10.0-10.1": "u",
-					"10.5": "u",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "y",
-					"6.0-6.1": "y",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "u",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 55.07,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "x-doc-messaging",
-			"keywords": ""
-		},
-		"css3-tabsize": {
-			"title": "CSS3 tab-size",
-			"description": "Method of customizing the width of a tab character. Only effective using 'white-space: pre'.",
-			"spec": "http://www.w3.org/TR/css3-text/#tab-size1",
-			"status": "wd",
-			"links": [{
-				"url": "https://developer.mozilla.org/en-US/docs/Web/CSS/tab-size",
-				"title": "MDN article"
-			}],
-			"categories": ["CSS3"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "y x",
-					"11": "y x",
-					"11.1": "y x",
-					"11.5": "y x",
-					"11.6": "y x",
-					"12": "y x",
-					"12.1": "y x",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "y",
-					"10": "y"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "y x",
-					"11.1": "y x",
-					"11.5": "y x",
-					"12": "y x",
-					"12.1": "y x",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 53.05,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "tab-size,tab-width"
-		},
-		"mutationobserver": {
-			"title": "Mutation Observer",
-			"description": "Method for observing and reacting to changes to the DOM. Replaces MutationEvents, which is deprecated.",
-			"spec": "http://www.w3.org/TR/dom/",
-			"status": "wd",
-			"links": [{
-				"url": "https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver",
-				"title": "MutationObserver from MDN"
-			}, {
-				"url": "https://github.com/Polymer/MutationObservers",
-				"title": "Polyfill"
-			}],
-			"categories": ["DOM", "JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "p",
-					"10": "p",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "y x",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "y x",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "p",
-					"4.1": "p",
-					"4.2-4.3": "p",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "y x"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "p"
-				}
-			},
-			"notes": "When the content of a node with a single CharacterData child node is changed by innerHTML attribute and the node have a single different one as a result, WebKit browsers consider it as a characterData mutation of the child CharacterData node, while other browsers think it as a childList mutation of the parent node.",
-			"usage_perc_y": 54.8,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "MutationObserver"
-		},
-		"css-selection": {
-			"title": "::selection CSS pseudo-element",
-			"description": "The ::selection CSS pseudo-element applies rules to the portion of a document that has been highlighted (e.g., selected with the mouse or another pointing device) by the user.",
-			"spec": "https://developer.mozilla.org/en-US/docs/Web/CSS/::selection",
-			"status": "unoff",
-			"links": [{
-				"url": "http://docs.webplatform.org/wiki/css/selectors/pseudo-elements/::selection",
-				"title": "WebPlatform Docs"
-			}, {
-				"url": "http://quirksmode.org/css/selectors/selection.html",
-				"title": "::selection test"
-			}],
-			"categories": ["CSS"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "y",
-					"10": "y",
-					"11": "y"
-				},
-				"firefox": {
-					"2": "y x",
-					"3": "y x",
-					"3.5": "y x",
-					"3.6": "y x",
-					"4": "y x",
-					"5": "y x",
-					"6": "y x",
-					"7": "y x",
-					"8": "y x",
-					"9": "y x",
-					"10": "y x",
-					"11": "y x",
-					"12": "y x",
-					"13": "y x",
-					"14": "y x",
-					"15": "y x",
-					"16": "y x",
-					"17": "y x",
-					"18": "y x",
-					"19": "y x",
-					"20": "y x",
-					"21": "y x",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x"
-				},
-				"chrome": {
-					"4": "y",
-					"5": "y",
-					"6": "y",
-					"7": "y",
-					"8": "y",
-					"9": "y",
-					"10": "y",
-					"11": "y",
-					"12": "y",
-					"13": "y",
-					"14": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y",
-					"19": "y",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y",
-					"28": "y",
-					"29": "y",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "y",
-					"3.2": "y",
-					"4": "y",
-					"5": "y",
-					"5.1": "y",
-					"6": "y",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "y",
-					"10.0-10.1": "y",
-					"10.5": "y",
-					"10.6": "y",
-					"11": "y",
-					"11.1": "y",
-					"11.5": "y",
-					"11.6": "y",
-					"12": "y",
-					"12.1": "y",
-					"15": "y",
-					"16": "y",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "u",
-					"11": "u",
-					"11.1": "u",
-					"11.5": "y",
-					"12": "y",
-					"12.1": "y",
-					"0": "y"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "n"
-				},
-				"ie_mob": {
-					"10": "y"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 71.68,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "::selection,selection"
-		},
-		"canvas-blending": {
-			"title": "Canvas blend modes",
-			"description": "Method of defining the effect resulting from overlaying two layers on a Canvas element. ",
-			"spec": "http://www.w3.org/TR/compositing-1/#blending",
-			"status": "wd",
-			"links": [{
-				"url": "http://blogs.adobe.com/webplatform/2013/01/28/blending-features-in-canvas/",
-				"title": "Blog post"
-			}],
-			"categories": ["Canvas"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "y",
-					"21": "y",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "n",
-					"24": "n",
-					"25": "n",
-					"26": "n",
-					"27": "n",
-					"28": "n",
-					"29": "n",
-					"30": "y",
-					"31": "y",
-					"32": "y"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "y",
-					"7": "y"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "y",
-					"18": "y"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "y"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "y"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "n"
-				},
-				"and_chr": {
-					"0": "y"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "",
-			"usage_perc_y": 42.33,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "canvas",
-			"keywords": ""
-		},
-		"clipboard": {
-			"title": "Clipboard API",
-			"description": "API to provide copy, cut and paste functionality using the OS clipboard.",
-			"spec": "http://www.w3.org/TR/clipboard-apis/",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.deluxeblogtips.com/2010/06/javascript-copy-to-clipboard.html",
-				"title": "Blog post on cross-browser usage"
-			}, {
-				"url": "https://developer.mozilla.org/en-US/docs/Web/API/ClipboardEvent",
-				"title": "MDN page on ClipboardEvent"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "a #1",
-					"6": "a #1",
-					"7": "a #1",
-					"8": "a #1",
-					"9": "a #1",
-					"10": "a #1",
-					"11": "a #1"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "y",
-					"23": "y",
-					"24": "y",
-					"25": "y",
-					"26": "y",
-					"27": "y"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "a",
-					"14": "a",
-					"15": "a",
-					"16": "a",
-					"17": "a",
-					"18": "a",
-					"19": "a",
-					"20": "a",
-					"21": "a",
-					"22": "a",
-					"23": "a",
-					"24": "a",
-					"25": "a",
-					"26": "a",
-					"27": "a",
-					"28": "a",
-					"29": "a",
-					"30": "a",
-					"31": "a",
-					"32": "a"
-				},
-				"safari": {
-					"3.1": "u",
-					"3.2": "u",
-					"4": "a",
-					"5": "a",
-					"5.1": "a",
-					"6": "a",
-					"6.1": "a",
-					"7": "a"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "a",
-					"17": "a",
-					"18": "a"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "a",
-					"6.0-6.1": "a",
-					"7.0": "a"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "a"
-				},
-				"bb": {
-					"7": "n",
-					"10": "a"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "a"
-				},
-				"and_chr": {
-					"0": "a"
-				},
-				"and_ff": {
-					"0": "y"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "Partial support in IE refers using <a href=\"http://msdn.microsoft.com/en-us/library/ie/ms535220%28v=vs.85%29.aspx\">a non-standard method</a> of interacting with the clipboard. For other browsers it refers to not supporting the ClipboardEvent constructor.",
-			"usage_perc_y": 12.83,
-			"usage_perc_a": 67.91,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": "cut,copy,paste,clipboarddata"
-		},
-		"rtcpeerconnection": {
-			"title": "WebRTC Peer-to-peer connections",
-			"description": "Method of allowing two users to communicate directly, browser to browser using the RTCPeerConnection API.",
-			"spec": "http://www.w3.org/TR/webrtc/#peer-to-peer-connections",
-			"status": "wd",
-			"links": [{
-				"url": "http://www.webrtc.org/",
-				"title": "WebRTC Project site"
-			}],
-			"categories": ["JS API"],
-			"stats": {
-				"ie": {
-					"5.5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n"
-				},
-				"firefox": {
-					"2": "n",
-					"3": "n",
-					"3.5": "n",
-					"3.6": "n",
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "y x",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x"
-				},
-				"chrome": {
-					"4": "n",
-					"5": "n",
-					"6": "n",
-					"7": "n",
-					"8": "n",
-					"9": "n",
-					"10": "n",
-					"11": "n",
-					"12": "n",
-					"13": "n",
-					"14": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n",
-					"19": "n",
-					"20": "n",
-					"21": "n",
-					"22": "n",
-					"23": "y x",
-					"24": "y x",
-					"25": "y x",
-					"26": "y x",
-					"27": "y x",
-					"28": "y x",
-					"29": "y x",
-					"30": "y x",
-					"31": "y x",
-					"32": "y x"
-				},
-				"safari": {
-					"3.1": "n",
-					"3.2": "n",
-					"4": "n",
-					"5": "n",
-					"5.1": "n",
-					"6": "n",
-					"6.1": "u",
-					"7": "u"
-				},
-				"opera": {
-					"9": "n",
-					"9.5-9.6": "n",
-					"10.0-10.1": "n",
-					"10.5": "n",
-					"10.6": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"11.6": "n",
-					"12": "n",
-					"12.1": "n",
-					"15": "n",
-					"16": "n",
-					"17": "n",
-					"18": "n"
-				},
-				"ios_saf": {
-					"3.2": "n",
-					"4.0-4.1": "n",
-					"4.2-4.3": "n",
-					"5.0-5.1": "n",
-					"6.0-6.1": "n",
-					"7.0": "n"
-				},
-				"op_mini": {
-					"5.0-7.0": "n"
-				},
-				"android": {
-					"2.1": "n",
-					"2.2": "n",
-					"2.3": "n",
-					"3": "n",
-					"4": "n",
-					"4.1": "n",
-					"4.2-4.3": "n",
-					"4.4": "n"
-				},
-				"bb": {
-					"7": "n",
-					"10": "n"
-				},
-				"op_mob": {
-					"10": "n",
-					"11": "n",
-					"11.1": "n",
-					"11.5": "n",
-					"12": "n",
-					"12.1": "n",
-					"0": "y x"
-				},
-				"and_chr": {
-					"0": "y x"
-				},
-				"and_ff": {
-					"0": "y x"
-				},
-				"ie_mob": {
-					"10": "n"
-				}
-			},
-			"notes": "BlackBerry 10 recognizes RTCPeerConnection but real support is unconfirmed.",
-			"usage_perc_y": 46.24,
-			"usage_perc_a": 0,
-			"ucprefix": false,
-			"parent": "",
-			"keywords": ""
-		}
-	}
-}});var plugin = require('plugin');plugin.require = require;plugin.define = define;return plugin;}));
+,});var plugin = require('plugin');plugin.require = require;plugin.define = define;return plugin;}));

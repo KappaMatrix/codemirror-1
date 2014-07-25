@@ -7,11 +7,11 @@ var rename = require('gulp-rename');
 gulp.task('default', function() {
 	// load JSON data
 	var snippets = fs.readFileSync('./node_modules/emmet/lib/snippets.json', {encoding: 'utf8'});
-	var caniuse = fs.readFileSync('./node_modules/emmet/lib/caniuse.json', {encoding: 'utf8'});
+	// var caniuse = fs.readFileSync('./node_modules/emmet/lib/caniuse.json', {encoding: 'utf8'});
 
 	var loadData = 'var emmet = require("emmet/emmet");emmet.loadUserData({' +
 		'snippets: ' + snippets + ',' +
-		'caniuse: ' + caniuse +
+		// 'caniuse: ' + caniuse +
 		'});';
 
 	return requirejs({
